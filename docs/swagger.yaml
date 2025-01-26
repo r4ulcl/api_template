@@ -1,0 +1,276 @@
+basePath: /
+definitions:
+  models.EmptyRequest:
+    properties:
+      field:
+        type: string
+    type: object
+  models.Example1:
+    properties:
+      field1:
+        type: string
+      field2:
+        type: string
+    type: object
+  models.Example2:
+    properties:
+      field1:
+        type: string
+      field2:
+        type: string
+    type: object
+  models.JWTResponse:
+    properties:
+      token:
+        type: string
+    type: object
+  models.LoginRequest:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+info:
+  contact:
+    email: support@yourdomain.com
+    name: API Support
+    url: http://yourdomain.com/support
+  description: This is a sample API for managing administrative resources like users,
+    servers, employees, groups, etc.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://yourdomain.com/terms/
+  title: Admin API Documentation
+  version: "1.0"
+paths:
+  /{resource}:
+    get:
+      description: Setup routes for CRUD operations on resources like users, servers,
+        employees, etc.
+      parameters:
+      - description: Resource type
+        enum:
+        - example1
+        - example2
+        - exampleRelational
+        in: path
+        name: resource
+        required: true
+        type: string
+      responses: {}
+      security:
+      - ApiKeyAuth: []
+      summary: Setup GET resource routes
+      tags:
+      - user
+    post:
+      description: Setup routes for administrative resources like users, servers,
+        employees, etc.
+      parameters:
+      - description: Resource type
+        enum:
+        - user
+        - example1
+        - example2
+        - exampleRelational
+        in: path
+        name: resource
+        required: true
+        type: string
+      - description: JSON request body for POST and PATCH operations
+        in: body
+        name: emptyRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.EmptyRequest'
+      - description: Example1 object to create
+        in: body
+        name: example1
+        schema:
+          $ref: '#/definitions/models.Example1'
+      - description: Example2 object to create
+        in: body
+        name: example2
+        schema:
+          $ref: '#/definitions/models.Example2'
+      responses: {}
+      security:
+      - ApiKeyAuth: []
+      summary: Setup admin routes
+      tags:
+      - admin
+  /{resource}/{id}:
+    delete:
+      description: Setup routes for administrative resources like users, servers,
+        employees, etc.
+      parameters:
+      - description: Resource type
+        enum:
+        - user
+        - example1
+        - example2
+        - exampleRelational
+        in: path
+        name: resource
+        required: true
+        type: string
+      - description: Resource ID (for operations on specific resources)
+        in: path
+        name: id
+        type: string
+      responses: {}
+      security:
+      - ApiKeyAuth: []
+      summary: Setup admin routes
+      tags:
+      - admin
+    get:
+      description: Setup routes for CRUD operations on resources like users, servers,
+        employees, etc.
+      parameters:
+      - description: Resource type
+        enum:
+        - example1
+        - example2
+        - exampleRelational
+        in: path
+        name: resource
+        required: true
+        type: string
+      - description: Resource ID (for operations on specific resources)
+        in: path
+        name: id
+        type: string
+      responses: {}
+      security:
+      - ApiKeyAuth: []
+      summary: Setup GET resource routes
+      tags:
+      - user
+    patch:
+      description: Setup routes for administrative resources like users, servers,
+        employees, etc.
+      parameters:
+      - description: Resource type
+        enum:
+        - user
+        - example1
+        - example2
+        - exampleRelational
+        in: path
+        name: resource
+        required: true
+        type: string
+      - description: Resource ID (for operations on specific resources)
+        in: path
+        name: id
+        type: string
+      - description: JSON request body for POST and PATCH operations
+        in: body
+        name: emptyRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.EmptyRequest'
+      - description: Example1 object to create
+        in: body
+        name: example1
+        schema:
+          $ref: '#/definitions/models.Example1'
+      - description: Example2 object to create
+        in: body
+        name: example2
+        schema:
+          $ref: '#/definitions/models.Example2'
+      responses: {}
+      security:
+      - ApiKeyAuth: []
+      summary: Setup admin routes
+      tags:
+      - admin
+  /login:
+    post:
+      consumes:
+      - application/json
+      description: Login using username and password, and return a JWT token for authorized
+        access
+      parameters:
+      - description: Login request with username and password
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/models.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.JWTResponse'
+        "400":
+          description: Invalid input
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: Object
+      security:
+      - ApiKeyAuth: []
+      summary: Login and generate JWT token
+      tags:
+      - authentication
+  /user:
+    get:
+      description: Setup routes for administrative resources like users, servers,
+        employees, etc.
+      responses: {}
+      security:
+      - ApiKeyAuth: []
+      summary: Setup admin routes
+      tags:
+      - admin
+  /users/register:
+    post:
+      description: Setup routes for administrative resources like users, servers,
+        employees, etc.
+      parameters:
+      - description: JSON request body for POST and PATCH operations
+        in: body
+        name: emptyRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.EmptyRequest'
+      - description: Example1 object to create
+        in: body
+        name: example1
+        schema:
+          $ref: '#/definitions/models.Example1'
+      - description: Example2 object to create
+        in: body
+        name: example2
+        schema:
+          $ref: '#/definitions/models.Example2'
+      responses: {}
+      security:
+      - ApiKeyAuth: []
+      summary: Setup admin routes
+      tags:
+      - admin
+schemes:
+- http
+- https
+security:
+- ApiKeyAuth: []
+securityDefinitions:
+  ApiKeyAuth:
+    description: JWT to login
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

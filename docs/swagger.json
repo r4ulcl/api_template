@@ -1,0 +1,411 @@
+{
+    "schemes": [
+        "http",
+        "https"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "This is a sample API for managing administrative resources like users, servers, employees, groups, etc.",
+        "title": "Admin API Documentation",
+        "termsOfService": "http://yourdomain.com/terms/",
+        "contact": {
+            "name": "API Support",
+            "url": "http://yourdomain.com/support",
+            "email": "support@yourdomain.com"
+        },
+        "license": {
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
+        },
+        "version": "1.0"
+    },
+    "basePath": "/",
+    "paths": {
+        "/login": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Login using username and password, and return a JWT token for authorized access",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "authentication"
+                ],
+                "summary": "Login and generate JWT token",
+                "parameters": [
+                    {
+                        "description": "Login request with username and password",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.LoginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.JWTResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "Object"
+                        }
+                    }
+                }
+            }
+        },
+        "/user": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Setup routes for administrative resources like users, servers, employees, etc.",
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Setup admin routes",
+                "responses": {}
+            }
+        },
+        "/users/register": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Setup routes for administrative resources like users, servers, employees, etc.",
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Setup admin routes",
+                "parameters": [
+                    {
+                        "description": "JSON request body for POST and PATCH operations",
+                        "name": "emptyRequest",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.EmptyRequest"
+                        }
+                    },
+                    {
+                        "description": "Example1 object to create",
+                        "name": "example1",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.Example1"
+                        }
+                    },
+                    {
+                        "description": "Example2 object to create",
+                        "name": "example2",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.Example2"
+                        }
+                    }
+                ],
+                "responses": {}
+            }
+        },
+        "/{resource}": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Setup routes for CRUD operations on resources like users, servers, employees, etc.",
+                "tags": [
+                    "user"
+                ],
+                "summary": "Setup GET resource routes",
+                "parameters": [
+                    {
+                        "enum": [
+                            "example1",
+                            "example2",
+                            "exampleRelational"
+                        ],
+                        "type": "string",
+                        "description": "Resource type",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {}
+            },
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Setup routes for administrative resources like users, servers, employees, etc.",
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Setup admin routes",
+                "parameters": [
+                    {
+                        "enum": [
+                            "user",
+                            "example1",
+                            "example2",
+                            "exampleRelational"
+                        ],
+                        "type": "string",
+                        "description": "Resource type",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "JSON request body for POST and PATCH operations",
+                        "name": "emptyRequest",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.EmptyRequest"
+                        }
+                    },
+                    {
+                        "description": "Example1 object to create",
+                        "name": "example1",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.Example1"
+                        }
+                    },
+                    {
+                        "description": "Example2 object to create",
+                        "name": "example2",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.Example2"
+                        }
+                    }
+                ],
+                "responses": {}
+            }
+        },
+        "/{resource}/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Setup routes for CRUD operations on resources like users, servers, employees, etc.",
+                "tags": [
+                    "user"
+                ],
+                "summary": "Setup GET resource routes",
+                "parameters": [
+                    {
+                        "enum": [
+                            "example1",
+                            "example2",
+                            "exampleRelational"
+                        ],
+                        "type": "string",
+                        "description": "Resource type",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource ID (for operations on specific resources)",
+                        "name": "id",
+                        "in": "path"
+                    }
+                ],
+                "responses": {}
+            },
+            "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Setup routes for administrative resources like users, servers, employees, etc.",
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Setup admin routes",
+                "parameters": [
+                    {
+                        "enum": [
+                            "user",
+                            "example1",
+                            "example2",
+                            "exampleRelational"
+                        ],
+                        "type": "string",
+                        "description": "Resource type",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource ID (for operations on specific resources)",
+                        "name": "id",
+                        "in": "path"
+                    }
+                ],
+                "responses": {}
+            },
+            "patch": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Setup routes for administrative resources like users, servers, employees, etc.",
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Setup admin routes",
+                "parameters": [
+                    {
+                        "enum": [
+                            "user",
+                            "example1",
+                            "example2",
+                            "exampleRelational"
+                        ],
+                        "type": "string",
+                        "description": "Resource type",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Resource ID (for operations on specific resources)",
+                        "name": "id",
+                        "in": "path"
+                    },
+                    {
+                        "description": "JSON request body for POST and PATCH operations",
+                        "name": "emptyRequest",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.EmptyRequest"
+                        }
+                    },
+                    {
+                        "description": "Example1 object to create",
+                        "name": "example1",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.Example1"
+                        }
+                    },
+                    {
+                        "description": "Example2 object to create",
+                        "name": "example2",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.Example2"
+                        }
+                    }
+                ],
+                "responses": {}
+            }
+        }
+    },
+    "definitions": {
+        "models.EmptyRequest": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Example1": {
+            "type": "object",
+            "properties": {
+                "field1": {
+                    "type": "string"
+                },
+                "field2": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Example2": {
+            "type": "object",
+            "properties": {
+                "field1": {
+                    "type": "string"
+                },
+                "field2": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.JWTResponse": {
+            "type": "object",
+            "properties": {
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.LoginRequest": {
+            "type": "object",
+            "required": [
+                "password",
+                "username"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "ApiKeyAuth": {
+            "description": "JWT to login",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    },
+    "security": [
+        {
+            "ApiKeyAuth": []
+        }
+    ]
+}
