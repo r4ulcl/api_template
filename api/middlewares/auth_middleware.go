@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/r4ulcl/api_template/models"
 	"github.com/r4ulcl/api_template/utils"
+	"github.com/r4ulcl/api_template/utils/models"
 )
 
 // ContextKey defines a type for context keys to avoid collisions.

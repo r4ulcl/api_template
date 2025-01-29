@@ -80,22 +80,21 @@ docker-compose up --build
 
 ## **Project Structure** 📂
 
-```
 api_template/
-│── config/         # Application configuration management
-│── controllers/    # Request handlers for API endpoints
-│── database/       # Database connection and queries
-│── docs/           # Swagger documentation files
-│── middlewares/    # Authentication and authorization middleware
-│── models/         # Data models (User, Roles, etc.)
-│── routes/         # API route definitions
-│── utils/          # Utility functions (hashing, JWT handling, etc.)
-│── main.go         # Application entry point
-│── Dockerfile      # Docker setup for building the app
-│── docker-compose.yml # Docker Compose configuration
-│── go.mod          # Go module dependencies
-│── go.sum          # Dependency checksums
-```
+├── api/                        # Contains all API-related logic
+│   ├── controllers/            # Request handlers for API endpoints (business logic)
+│   ├── middlewares/            # Authentication, authorization, and other middleware
+│   └── routes/                 # Routing definitions that map endpoints to controllers
+├── database/                   # Database connection and query logic
+├── docs/                       # Swagger/OpenAPI files and other documentation
+├── utils/                      # Utility functions (e.g., hashing, JWT creation)
+│   └── models/                 # Data models and structs (e.g., User, Roles)
+├── main.go                     # Application entry point: runs the server
+├── Dockerfile                  # Instructions to containerize the application
+├── docker-compose.yml          # Docker Compose config for multi-service setups
+├── go.mod                      # Go module dependencies and module path
+└── go.sum                      # Dependency checksums for reproducible builds
+
 
 ---
 

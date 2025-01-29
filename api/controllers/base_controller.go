@@ -8,7 +8,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/r4ulcl/api_template/database"
-	"github.com/r4ulcl/api_template/models"
+	"github.com/r4ulcl/api_template/utils/models"
 )
 
 // Controller provides methods for handling CRUD operations.

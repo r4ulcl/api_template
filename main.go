@@ -4,11 +4,11 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/r4ulcl/api_template/config"
-	"github.com/r4ulcl/api_template/controllers"
+	"github.com/r4ulcl/api_template/api/controllers"
+	"github.com/r4ulcl/api_template/api/routes"
 	"github.com/r4ulcl/api_template/database"
 	_ "github.com/r4ulcl/api_template/docs"
-	"github.com/r4ulcl/api_template/routes"
+	"github.com/r4ulcl/api_template/utils"
 )
 
 // @title Admin API Documentation
@@ -39,7 +39,7 @@ import (
 // sets up the router, and starts the HTTP server.
 func main() {
 	// Load application configuration
-	cfg := config.LoadConfig()
+	cfg := utils.LoadConfig()
 
 	// Connect to the database using loaded configuration
 	database.ConnectDB(cfg)

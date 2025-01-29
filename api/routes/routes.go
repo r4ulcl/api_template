@@ -6,10 +6,10 @@ import (
 	"reflect"
 
 	"github.com/gorilla/mux"
-	"github.com/r4ulcl/api_template/controllers"
+	"github.com/r4ulcl/api_template/api/controllers"
+	"github.com/r4ulcl/api_template/api/middlewares"
 	_ "github.com/r4ulcl/api_template/docs"
-	"github.com/r4ulcl/api_template/middlewares"
-	"github.com/r4ulcl/api_template/models"
+	"github.com/r4ulcl/api_template/utils/models"
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 

@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/r4ulcl/api_template/database"
-	"github.com/r4ulcl/api_template/models"
 	"github.com/r4ulcl/api_template/utils"
+	"github.com/r4ulcl/api_template/utils/models"
 )
 
 // AuthController handles authentication-related requests, including user registration and login.

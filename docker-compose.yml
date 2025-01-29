@@ -28,7 +28,7 @@ services:
     depends_on:
       - db  # Ensure the database service starts before the application
     ports:
-      - "8088:8080"  # Map application port 8080 to host port 8088
+      - "8080:8080"  # Map application port 8080 to host port 8080
     environment:
       # Database configuration (should match MySQL service settings)
       DB_HOST: db  # The hostname of the MySQL container

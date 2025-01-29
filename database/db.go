@@ -7,9 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/r4ulcl/api_template/config"
-	"github.com/r4ulcl/api_template/models"
 	"github.com/r4ulcl/api_template/utils"
+	"github.com/r4ulcl/api_template/utils/models"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -33,7 +32,7 @@ type BaseController struct {
 // - cfg: A pointer to the configuration containing database credentials.
 //
 // This function also performs automatic migrations for all registered models.
-func ConnectDB(cfg *config.Config) {
+func ConnectDB(cfg *utils.Config) {
 	dsn := cfg.DSN() // Generate the database connection string
 	var db *gorm.DB
 	var err error
