@@ -46,7 +46,7 @@ func SetupRouter(baseController *controllers.Controller, authController *control
 		"example2":          &models.Example2{},
 		"exampleRelational": &models.ExampleRelational{},
 	}
-	setupGetResourceRoutes(all, baseController, root, resources, modelMap)
+	setupURLResourceRoutes(all, baseController, root, resources, modelMap)
 
 	// Admin-only subrouter
 	adminOnly := all.NewRoute().Subrouter()
@@ -55,13 +55,14 @@ func SetupRouter(baseController *controllers.Controller, authController *control
 	// Generic admin route setup for resources
 	rootAdmin := "/"
 	resourcesAdmin := []string{"user", "example1", "example2", "exampleRelational"}
+	// Separated to have different Swagger comments
 	setupURLAdminResourceRoutes(adminOnly, baseController, rootAdmin, resourcesAdmin, modelMap)
 	setupBodyAdminResourceRoutes(adminOnly, baseController, authController, rootAdmin, resourcesAdmin, modelMap)
 
 	return r
 }
 
-// setupGetResourceRoutes sets up the common routes for CRUD operations for resources
+// setupURLResourceRoutes sets up the common routes for CRUD operations for resources
 // @Summary Setup GET resource routes
 // @Tags user
 // @Description Setup routes for CRUD operations on resources like users, servers, employees, etc.
@@ -70,7 +71,7 @@ func SetupRouter(baseController *controllers.Controller, authController *control
 // @Router /{resource} [get]
 // @Router /{resource}/{id} [get]
 // @security ApiKeyAuth
-func setupGetResourceRoutes(router *mux.Router, controller *controllers.Controller, root string, resources []string, modelMap map[string]interface{}) {
+func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controller, root string, resources []string, modelMap map[string]interface{}) {
 	for _, resource := range resources {
 		resourcePath := root + resource
 		log.Println("resourcePath setupResourceRoutes", resourcePath)
@@ -145,10 +146,10 @@ func setupURLAdminResourceRoutes(router *mux.Router, controller *controllers.Con
 // @Description Setup routes for administrative resources like users, servers, employees, etc.
 // @Param resource path string true "Resource type" Enums(user, example1, example2, exampleRelational)
 // @Param id path string false "Resource ID (for operations on specific resources)"
-// @Router /{resource} [post]              // POST route: Body parameter required
-// @Router /users/register [post]          // POST route for registration: Body parameter required
-// @Router /{resource}/{id} [patch]        // PATCH route: Body parameter required
 // @security ApiKeyAuth
+// @Router /{resource} [post]
+// @Router /{resource} [put]
+// @Router /{resource}/{id} [patch]
 // @Param defaultRequest body models.DefaultRequest true "JSON request body for POST and PATCH operations"
 // @param example1 body models.Example1 false "Example1 object to create"
 // @param example2 body models.Example2 false "Example2 object to create"
@@ -156,19 +157,27 @@ func setupBodyAdminResourceRoutes(router *mux.Router, controller *controllers.Co
 	for _, resource := range resources {
 		resourcePath := root + resource
 
-		// Admin POST route to create a new resource (special handling for "users")
-		if resource == "user" {
-			router.HandleFunc(resourcePath+"/register", authController.Register).Methods("POST")
-		} else {
-			router.HandleFunc(resourcePath, func(w http.ResponseWriter, r *http.Request) {
-				modelType := modelMap[resource]
-				if modelType == nil {
-					http.Error(w, "Invalid resource", http.StatusBadRequest)
-					return
-				}
-				controller.Create(w, r, modelType)
-			}).Methods("POST")
-		}
+		// Admin POST route to create a new resource
+		router.HandleFunc(resourcePath, func(w http.ResponseWriter, r *http.Request) {
+			modelType := modelMap[resource]
+			if modelType == nil {
+				http.Error(w, "Invalid resource", http.StatusBadRequest)
+				return
+			}
+			overwrite := false
+			controller.Create(w, r, modelType, overwrite)
+		}).Methods("POST")
+
+		// Admin POST route to create a new resource
+		router.HandleFunc(resourcePath, func(w http.ResponseWriter, r *http.Request) {
+			modelType := modelMap[resource]
+			if modelType == nil {
+				http.Error(w, "Invalid resource", http.StatusBadRequest)
+				return
+			}
+			overwrite := true
+			controller.Create(w, r, modelType, overwrite)
+		}).Methods("PUT")
 
 		router.HandleFunc(resourcePath+"/{id}", func(w http.ResponseWriter, r *http.Request) {
 			modelType := modelMap[resource]

@@ -203,30 +203,53 @@ func (bc *BaseController) GetRecordsByID(model interface{}, id string) error {
 //
 // Parameters:
 // - model: A pointer to the struct representing the updated data.
-// - id: A string representing the primary key(s).
+// - id: A string representing the primary key(s), separated by "-" if multiple.
 //
 // Returns:
 // - An error if the record is not found or update fails.
 func (bc *BaseController) UpdateRecords(model interface{}, id string) error {
-	parts := strings.Split(id, "-")
-	primaryKeys := getJSONPrimaryKeys(model)
+	var primaryKeys []string
+	var keyValues []string
 
-	if len(primaryKeys) != len(parts) {
-		return fmt.Errorf("Mismatch between primary keys and tokenized ID")
+	if id != "" {
+		// When ID is provided, split it and use it
+		parts := strings.Split(id, "-")
+		primaryKeys = getJSONPrimaryKeys(model)
+
+		if len(primaryKeys) != len(parts) {
+			return fmt.Errorf("mismatch between number of primary keys and ID parts")
+		}
+
+		keyValues = parts
+	} else {
+		// When ID is empty, extract primary key values from the model
+		var err error
+		keyValues, err = getPrimaryKeyValues(model)
+		if err != nil {
+			return fmt.Errorf("failed to get primary key values from model: %v", err)
+		}
+		primaryKeys = getJSONPrimaryKeys(model)
+
+		if len(primaryKeys) == 0 {
+			return fmt.Errorf("no primary keys found in the model")
+		}
 	}
 
+	// Construct the query based on primary keys and their values
 	query := bc.DB.Model(model)
 	for i, pk := range primaryKeys {
-		query = query.Where(pk+" = ?", parts[i])
+		query = query.Where(pk+" = ?", keyValues[i])
 	}
 
+	// Attempt to find the existing record
 	if err := query.First(model).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return fmt.Errorf("Record not found")
+			return fmt.Errorf("record not found")
 		}
 		return err
 	}
 
+	// Save the updated model
 	return bc.DB.Save(model).Error
 }
 
@@ -280,8 +303,28 @@ func getJSONPrimaryKeys(model interface{}) []string {
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 		if strings.Contains(field.Tag.Get("gorm"), "primaryKey") {
-			keys = append(keys, field.Tag.Get("json"))
+			jsonTag := field.Tag.Get("json")
+			// Handle cases where json tag might have options like "id,omitempty"
+			jsonField := strings.Split(jsonTag, ",")[0]
+			keys = append(keys, jsonField)
 		}
 	}
 	return keys
+}
+
+// getPrimaryKeyValues extracts the primary key values from the model.
+func getPrimaryKeyValues(model interface{}) ([]string, error) {
+	var values []string
+	val := reflect.ValueOf(model).Elem()
+	primaryKeys := getPrimaryKeyFields(model)
+
+	for _, pk := range primaryKeys {
+		fieldVal := val.FieldByName(pk)
+		if !fieldVal.IsValid() {
+			return nil, fmt.Errorf("primary key field %s not found in model", pk)
+		}
+		// Convert the field value to string
+		values = append(values, fmt.Sprintf("%v", fieldVal.Interface()))
+	}
+	return values, nil
 }

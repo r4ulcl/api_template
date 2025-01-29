@@ -1,15 +1,19 @@
 basePath: /
 definitions:
-  models.EmptyRequest:
+  models.DefaultRequest:
     properties:
       field:
+        description: Field is a placeholder for data that might be required in some
+          requests.
         type: string
     type: object
   models.Example1:
     properties:
       field1:
+        description: Field1 is the primary key of the Example1 table.
         type: string
       field2:
+        description: Field2 stores additional data related to Example1.
         type: string
     type: object
   models.Example2:
@@ -22,13 +26,17 @@ definitions:
   models.JWTResponse:
     properties:
       token:
+        description: Token is the JWT token assigned to the authenticated user.
         type: string
     type: object
   models.LoginRequest:
     properties:
       password:
+        description: Password is the user's password used for authentication.
         type: string
       username:
+        description: Username is the unique identifier for the user attempting to
+          log in.
         type: string
     required:
     - password
@@ -84,10 +92,46 @@ paths:
         type: string
       - description: JSON request body for POST and PATCH operations
         in: body
-        name: emptyRequest
+        name: defaultRequest
         required: true
         schema:
-          $ref: '#/definitions/models.EmptyRequest'
+          $ref: '#/definitions/models.DefaultRequest'
+      - description: Example1 object to create
+        in: body
+        name: example1
+        schema:
+          $ref: '#/definitions/models.Example1'
+      - description: Example2 object to create
+        in: body
+        name: example2
+        schema:
+          $ref: '#/definitions/models.Example2'
+      responses: {}
+      security:
+      - ApiKeyAuth: []
+      summary: Setup admin routes
+      tags:
+      - admin
+    put:
+      description: Setup routes for administrative resources like users, servers,
+        employees, etc.
+      parameters:
+      - description: Resource type
+        enum:
+        - user
+        - example1
+        - example2
+        - exampleRelational
+        in: path
+        name: resource
+        required: true
+        type: string
+      - description: JSON request body for POST and PATCH operations
+        in: body
+        name: defaultRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.DefaultRequest'
       - description: Example1 object to create
         in: body
         name: example1
@@ -172,10 +216,10 @@ paths:
         type: string
       - description: JSON request body for POST and PATCH operations
         in: body
-        name: emptyRequest
+        name: defaultRequest
         required: true
         schema:
-          $ref: '#/definitions/models.EmptyRequest'
+          $ref: '#/definitions/models.DefaultRequest'
       - description: Example1 object to create
         in: body
         name: example1
@@ -229,33 +273,6 @@ paths:
     get:
       description: Setup routes for administrative resources like users, servers,
         employees, etc.
-      responses: {}
-      security:
-      - ApiKeyAuth: []
-      summary: Setup admin routes
-      tags:
-      - admin
-  /users/register:
-    post:
-      description: Setup routes for administrative resources like users, servers,
-        employees, etc.
-      parameters:
-      - description: JSON request body for POST and PATCH operations
-        in: body
-        name: emptyRequest
-        required: true
-        schema:
-          $ref: '#/definitions/models.EmptyRequest'
-      - description: Example1 object to create
-        in: body
-        name: example1
-        schema:
-          $ref: '#/definitions/models.Example1'
-      - description: Example2 object to create
-        in: body
-        name: example2
-        schema:
-          $ref: '#/definitions/models.Example2'
       responses: {}
       security:
       - ApiKeyAuth: []

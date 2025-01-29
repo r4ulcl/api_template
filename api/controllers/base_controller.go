@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/lib/pq"
 	"github.com/r4ulcl/api_template/database"
 	"github.com/r4ulcl/api_template/utils/models"
 )
@@ -27,11 +28,12 @@ type Controller struct {
 // - w: The HTTP response writer.
 // - r: The HTTP request containing the JSON payload.
 // - model: A pointer to the struct representing the database entity.
+// - overwrite: Bool to create and overwrite if already exists
 //
 // Returns:
 // - HTTP 400 if the request body is invalid.
 // - HTTP 201 if the record is successfully created.
-func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interface{}) {
+func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interface{}, overwrite bool) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if err := json.NewDecoder(r.Body).Decode(model); err != nil {
@@ -40,7 +42,23 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 		return
 	}
 
+	// Attempt to create the record
 	if err := c.BC.CreateRecord(model); err != nil {
+		// Check if the error is due to a duplicate key
+		if isDuplicateKeyError(err) {
+			// Perform the update instead
+			if updateErr := c.BC.UpdateRecords(model, ""); updateErr != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: updateErr.Error()})
+				return
+			}
+			// Optionally, you can return a different status code for updates
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(model)
+			return
+		}
+
+		// For other errors, return an internal server error
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
 		return
@@ -219,4 +237,11 @@ func extractColumnName(gormTag string) string {
 		}
 	}
 	return ""
+}
+
+func isDuplicateKeyError(err error) bool {
+	if pqErr, ok := err.(*pq.Error); ok {
+		return pqErr.Code == "23505" // unique_violation
+	}
+	return false
 }

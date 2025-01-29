@@ -10,16 +10,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy the rest of the application files
-COPY ./config ./config
-COPY ./controllers ./controllers
+COPY ./api ./api
 COPY ./database ./database
 COPY ./docs ./docs
-COPY ./middlewares ./middlewares
-COPY ./models ./models
-COPY ./routes ./routes
 COPY ./utils ./utils
 COPY ./main.go ./
-
 # Build the Go binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o app 
 

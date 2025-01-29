@@ -90,48 +90,6 @@ const docTemplate = `{
                 "responses": {}
             }
         },
-        "/users/register": {
-            "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "Setup routes for administrative resources like users, servers, employees, etc.",
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Setup admin routes",
-                "parameters": [
-                    {
-                        "description": "JSON request body for POST and PATCH operations",
-                        "name": "emptyRequest",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.EmptyRequest"
-                        }
-                    },
-                    {
-                        "description": "Example1 object to create",
-                        "name": "example1",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/models.Example1"
-                        }
-                    },
-                    {
-                        "description": "Example2 object to create",
-                        "name": "example2",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/models.Example2"
-                        }
-                    }
-                ],
-                "responses": {}
-            }
-        },
         "/{resource}": {
             "get": {
                 "security": [
@@ -156,6 +114,59 @@ const docTemplate = `{
                         "name": "resource",
                         "in": "path",
                         "required": true
+                    }
+                ],
+                "responses": {}
+            },
+            "put": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Setup routes for administrative resources like users, servers, employees, etc.",
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Setup admin routes",
+                "parameters": [
+                    {
+                        "enum": [
+                            "user",
+                            "example1",
+                            "example2",
+                            "exampleRelational"
+                        ],
+                        "type": "string",
+                        "description": "Resource type",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "JSON request body for POST and PATCH operations",
+                        "name": "defaultRequest",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.DefaultRequest"
+                        }
+                    },
+                    {
+                        "description": "Example1 object to create",
+                        "name": "example1",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.Example1"
+                        }
+                    },
+                    {
+                        "description": "Example2 object to create",
+                        "name": "example2",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.Example2"
+                        }
                     }
                 ],
                 "responses": {}
@@ -187,11 +198,11 @@ const docTemplate = `{
                     },
                     {
                         "description": "JSON request body for POST and PATCH operations",
-                        "name": "emptyRequest",
+                        "name": "defaultRequest",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.EmptyRequest"
+                            "$ref": "#/definitions/models.DefaultRequest"
                         }
                     },
                     {
@@ -315,11 +326,11 @@ const docTemplate = `{
                     },
                     {
                         "description": "JSON request body for POST and PATCH operations",
-                        "name": "emptyRequest",
+                        "name": "defaultRequest",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.EmptyRequest"
+                            "$ref": "#/definitions/models.DefaultRequest"
                         }
                     },
                     {
@@ -344,10 +355,11 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "models.EmptyRequest": {
+        "models.DefaultRequest": {
             "type": "object",
             "properties": {
                 "field": {
+                    "description": "Field is a placeholder for data that might be required in some requests.",
                     "type": "string"
                 }
             }
@@ -356,9 +368,11 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "field1": {
+                    "description": "Field1 is the primary key of the Example1 table.",
                     "type": "string"
                 },
                 "field2": {
+                    "description": "Field2 stores additional data related to Example1.",
                     "type": "string"
                 }
             }
@@ -378,6 +392,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "token": {
+                    "description": "Token is the JWT token assigned to the authenticated user.",
                     "type": "string"
                 }
             }
@@ -390,9 +405,11 @@ const docTemplate = `{
             ],
             "properties": {
                 "password": {
+                    "description": "Password is the user's password used for authentication.",
                     "type": "string"
                 },
                 "username": {
+                    "description": "Username is the unique identifier for the user attempting to log in.",
                     "type": "string"
                 }
             }
