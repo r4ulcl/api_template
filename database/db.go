@@ -262,19 +262,63 @@ func (bc *BaseController) UpdateRecords(model interface{}, id string) error {
 // Returns:
 // - An error if deletion fails.
 func (bc *BaseController) DeleteRecords(model interface{}, id string) error {
+	tx := bc.DB.Debug().
+		Session(&gorm.Session{NewDB: true}).
+		Model(model)
+
+	// Split the incoming ID by "-" for potential composite keys.
 	parts := strings.Split(id, "-")
+
+	// Get all JSON field names where GORM tag includes "primaryKey".
 	primaryKeys := getJSONPrimaryKeys(model)
 
 	if len(primaryKeys) != len(parts) {
-		return fmt.Errorf("Mismatch between primary keys and tokenized ID")
+		return fmt.Errorf("mismatch between primary keys (%d) and tokenized ID parts (%d)",
+			len(primaryKeys), len(parts))
 	}
 
-	query := bc.DB.Model(model)
-	for i, pk := range primaryKeys {
-		query = query.Where(pk+" = ?", parts[i])
+	// Reflect on the `model` pointer to reach its underlying struct fields.
+	val := reflect.ValueOf(model)
+	if val.Kind() != reflect.Ptr || val.IsNil() {
+		return fmt.Errorf("model must be a non-nil pointer to a struct")
+	}
+	elem := val.Elem()
+	if elem.Kind() != reflect.Struct {
+		return fmt.Errorf("model must point to a struct")
 	}
 
-	return query.Delete(model).Error
+	// We'll iterate through fields in the struct in the same order as `getJSONPrimaryKeys`.
+	// Each time we find a primaryKey field, we assign the corresponding `parts[i]`.
+	pkCount := 0
+	for i := 0; i < elem.NumField(); i++ {
+		fieldType := elem.Type().Field(i)
+		gormTag := fieldType.Tag.Get("gorm")
+		if strings.Contains(gormTag, "primaryKey") {
+			// This field is a primary key. We set its value to parts[pkCount].
+			// NOTE: If your PK is an integer, parse parts[pkCount] accordingly.
+			fieldValue := elem.Field(i)
+			if !fieldValue.CanSet() {
+				return fmt.Errorf("cannot set value for field %s", fieldType.Name)
+			}
+			// For simplicity, assume string primary keys. Adjust if numeric.
+			fieldValue.SetString(parts[pkCount])
+			pkCount++
+		}
+	}
+
+	// Now that the primary key fields are updated to match `id`,
+	// GORM will generate a delete statement like:
+	//    DELETE FROM `example1` WHERE `example1`.`field1` = 'id'
+	res := tx.Delete(model)
+	if res.Error != nil {
+		return res.Error
+	}
+
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("no records deleted for ID %s", id)
+	}
+
+	return nil
 }
 
 // getPrimaryKeyFields extracts the GORM primary key fields from a struct.
