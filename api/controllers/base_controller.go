@@ -3,11 +3,8 @@ package controllers
 import (
 	"encoding/json"
 	"net/http"
-	"reflect"
-	"strings"
 
 	"github.com/gorilla/mux"
-	"github.com/lib/pq"
 	"github.com/r4ulcl/api_template/database"
 	"github.com/r4ulcl/api_template/utils/models"
 )
@@ -42,28 +39,15 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 		return
 	}
 
-	// Attempt to create the record
-	if err := c.BC.CreateRecord(model); err != nil {
-		// Check if the error is due to a duplicate key
-		if isDuplicateKeyError(err) {
-			// Perform the update instead
-			if updateErr := c.BC.UpdateRecords(model, ""); updateErr != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: updateErr.Error()})
-				return
-			}
-			// Optionally, you can return a different status code for updates
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(model)
-			return
-		}
-
-		// For other errors, return an internal server error
+	// Use the new CreateOrUpdateRecord function
+	if err := c.BC.CreateOrUpdateRecord(model, overwrite); err != nil {
+		// If it's a duplicate key error and overwrite == false, or any other DB error
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
 		return
 	}
 
+	// If the create (or update) succeeded
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(model)
 }
@@ -190,58 +174,4 @@ func (c *Controller) Delete(w http.ResponseWriter, r *http.Request, model interf
 	}
 
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Deleted successfully"})
-}
-
-// getJSONPrimaryKeys extracts the `json` tag values for fields marked as primary keys in the model.
-//
-// Parameters:
-// - model: The struct type to extract primary keys from.
-//
-// Returns:
-// - A slice of JSON tag values corresponding to primary key fields.
-func getJSONPrimaryKeys(model interface{}) []string {
-	var keys []string
-	typ := reflect.TypeOf(model)
-	if typ.Kind() == reflect.Ptr { // Handle pointer types
-		typ = typ.Elem()
-	}
-
-	// Iterate over struct fields
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
-
-		// Check for `gorm:"primaryKey"` tag
-		if strings.Contains(field.Tag.Get("gorm"), "primaryKey") {
-			jsonTag := field.Tag.Get("json")
-			if jsonTag != "" && jsonTag != "-" {
-				keys = append(keys, jsonTag)
-			}
-		}
-	}
-
-	return keys
-}
-
-// extractColumnName extracts the column name from the GORM struct tag.
-//
-// Parameters:
-// - gormTag: The GORM tag string.
-//
-// Returns:
-// - The extracted column name or an empty string if not found.
-func extractColumnName(gormTag string) string {
-	parts := strings.Split(gormTag, ";")
-	for _, part := range parts {
-		if strings.HasPrefix(part, "column:") {
-			return strings.TrimPrefix(part, "column:")
-		}
-	}
-	return ""
-}
-
-func isDuplicateKeyError(err error) bool {
-	if pqErr, ok := err.(*pq.Error); ok {
-		return pqErr.Code == "23505" // unique_violation
-	}
-	return false
 }

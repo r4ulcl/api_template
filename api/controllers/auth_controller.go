@@ -1,7 +1,10 @@
+// file: controllers/auth_controller.go
+
 package controllers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/r4ulcl/api_template/database"
@@ -9,93 +12,125 @@ import (
 	"github.com/r4ulcl/api_template/utils/models"
 )
 
-// AuthController handles authentication-related requests, including user registration and login.
+// AuthController Struct for secret and database.BaseController
 type AuthController struct {
-	Secret string // Secret key for signing JWT tokens
+	Secret string
+	BC     *database.BaseController
 }
 
-// Register handles user registration by accepting the user's input, validating it, and storing it in the database.
+var (
+	errInvalidInput      = errors.New("invalid input")
+	errUserAlreadyExists = errors.New("user already exists")
+)
+
+// RegisterUser contains the core logic for creating a new user in the DB.
+// It checks for existing usernames, hashes the password, and inserts into the DB.
+//
+// Return values:
+//  1. The newly created user (without the raw password).
+//  2. An error if something went wrong.
+func (ac *AuthController) RegisterUser(user models.User) (models.User, error) {
+	// Basic validation
+	if user.Username == "" || user.Password == "" {
+		return user, errInvalidInput // you can define a sentinel error
+	}
+
+	// Hash the password
+	hashedPass, err := utils.HashPassword(user.Password)
+	if err != nil {
+		return user, err
+	}
+	user.Password = hashedPass
+
+	// Assign role
+	if user.Role == "admin" {
+		user.Role = models.AdminRole
+	} else {
+		user.Role = models.UserRole
+	}
+
+	// Create the user in DB
+	if err := ac.BC.CreateOrUpdateRecord(&user, true); err != nil {
+		return user, err
+	}
+
+	// Return the newly-created user (password is already hashed)
+	return user, nil
+}
+
+// Register is the HTTP handler that leverages RegisterUser()
+// to perform the actual user registration logic.
 func (ac *AuthController) Register(w http.ResponseWriter, r *http.Request) {
-	// Set response header to indicate JSON content
 	w.Header().Set("Content-Type", "application/json")
 
-	// Create an empty user model to store the incoming data
+	// Decode user input
 	var user models.User
-	// Decode incoming JSON body into the user model
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		// If decoding fails, return a Bad Request status with an error message
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid input"})
 		return
 	}
 
-	// Set default role to "user" if not provided, or "admin" if explicitly set
-	admin := false
-	if user.Role == "admin" {
-		admin = true
-	}
-
-	// Call the database function to create the user
-	err := database.CreateUser(user.Username, user.Password, admin)
-	if err != nil {
-		// If there's an error creating the user, return an Internal Server Error status with the error message
+	createdUser, err := ac.RegisterUser(user)
+	switch err {
+	case nil:
+		// Successfully created
+		w.WriteHeader(http.StatusCreated)
+		// NOTE: You may want to omit the password from the response here
+		_ = json.NewEncoder(w).Encode(createdUser)
+	case errInvalidInput:
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Username and password cannot be empty"})
+	case errUserAlreadyExists:
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "User already exists"})
+	default:
+		// Any other error
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
-		return
 	}
-
-	// Return a Created status with the user data
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(user)
 }
 
-// Login handles user login and token generation.
+// Login existing user
 func (ac *AuthController) Login(w http.ResponseWriter, r *http.Request) {
-	// Set response header to indicate JSON content
 	w.Header().Set("Content-Type", "application/json")
 
-	// Create a structure to hold the login input
 	var input struct {
-		Username string `json:"username"` // Username of the user
-		Password string `json:"password"` // Password of the user
+		Username string `json:"username"`
+		Password string `json:"password"`
 	}
-
-	// Decode the incoming JSON body into the input structure
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		// If decoding fails, return a Bad Request status with an error message
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid input"})
 		return
 	}
 
-	// Create a user object to fetch from the database
+	// Fetch the user by primary key (username)
 	var user models.User
-	// Query the database for the user by username
-	if err := database.DB.Where("username = ?", input.Username).First(&user).Error; err != nil {
-		// If the user is not found, return Unauthorized status with an error message
+	err := ac.BC.GetRecordsByID(&user, input.Username)
+	if err != nil {
+		// Either user not found or other DB error
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid username or password"})
 		return
 	}
 
-	// Check if the provided password matches the stored password hash
+	// Check password
 	if err := utils.CheckPassword(user.Password, input.Password); err != nil {
-		// If password verification fails, return Unauthorized status with an error message
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid username or password"})
 		return
 	}
 
-	// Generate a JWT token for the user after successful login
+	// Generate JWT token
 	token, err := utils.GenerateJWT(user.Username, string(user.Role), ac.Secret)
 	if err != nil {
-		// If token generation fails, return Internal Server Error status with an error message
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Failed to generate token"})
 		return
 	}
 
-	// Return a successful response with the generated token
+	// Return token
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
 }

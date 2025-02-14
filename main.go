@@ -9,6 +9,7 @@ import (
 	"github.com/r4ulcl/api_template/database"
 	_ "github.com/r4ulcl/api_template/docs"
 	"github.com/r4ulcl/api_template/utils"
+	"github.com/r4ulcl/api_template/utils/models"
 )
 
 // @title Admin API Documentation
@@ -44,17 +45,23 @@ func main() {
 	// Connect to the database using loaded configuration
 	database.ConnectDB(cfg)
 
-	// Create default admin user
-	username := "admin"
-	err := database.CreateUser(username, cfg.AdminPassword, true)
-	if err != nil {
-		log.Println("Error creating default user")
-	}
-
 	// Initialize controllers
 	authController := &controllers.AuthController{Secret: cfg.JWTSecret}
 	baseController := &database.BaseController{DB: database.DB}
 	controller := &controllers.Controller{BC: baseController}
+
+	username := "admin"
+	user := models.User{
+		Username: username,
+		Role:     "admin",
+		Password: cfg.AdminPassword,
+	}
+	user, err := authController.RegisterUser(user)
+	if err != nil {
+		log.Println("Error creating admin user")
+	} else {
+		log.Println("User created: ", user)
+	}
 
 	// Setup the router
 	r := routes.SetupRouter(controller, authController, cfg.JWTSecret)

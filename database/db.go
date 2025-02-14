@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/r4ulcl/api_template/utils"
 	"github.com/r4ulcl/api_template/utils/models"
 	"gorm.io/driver/mysql"
@@ -70,70 +71,53 @@ func ConnectDB(cfg *utils.Config) {
 	DB = db
 }
 
-// CreateUser creates a new user in the database.
-//
-// If the username already exists, user creation is skipped.
-// If an admin flag is set, the user will be assigned an admin role.
+// CreateOrUpdateRecord attempts to create a new record. If a duplicate key error
+// is encountered (and overwrite == true), it falls back to an update.
 //
 // Parameters:
-// - username: The username for the new user.
-// - password: The plaintext password (will be hashed before storage).
-// - admin: A boolean indicating if the user should have admin privileges.
+// - model: A pointer to the struct representing the database entity.
+// - overwrite: Whether to update the record on duplicate key conflict.
 //
 // Returns:
-// - An error if the user already exists or if an issue occurs during creation.
-func CreateUser(username, password string, admin bool) error {
-	if password == "" {
-		return fmt.Errorf("password not set, skipping user creation")
-	}
-
-	// Check if the user already exists
-	var existingUser models.User
-	if err := DB.Where("username = ?", username).First(&existingUser).Error; err == nil {
-		return fmt.Errorf("user already exists, skipping creation")
-	}
-
-	// Hash the password before storing it
-	hashedPassword, err := utils.HashPassword(password)
-	if err != nil {
-		return fmt.Errorf("failed to hash password: %v", err)
-	}
-
-	// Determine the user's role
-	role := models.UserRole
-	if admin {
-		role = models.AdminRole
-	}
-
-	// Create and save the new user
-	user := models.User{
-		Username: username,
-		Password: hashedPassword,
-		Role:     role,
-	}
-
-	if err := DB.Create(&user).Error; err != nil {
-		if err == gorm.ErrDuplicatedKey {
-			return fmt.Errorf("user with this username already exists")
+// - An error if creation fails and overwrite is false, or if the update fails.
+func (bc *BaseController) CreateOrUpdateRecord(model interface{}, overwrite bool) error {
+	// Try to create the record
+	if err := bc.DB.Create(model).Error; err != nil {
+		// Check if it's a duplicate key error
+		if isDuplicateKeyError(err) {
+			// Only overwrite (update) if the overwrite flag is true
+			if overwrite {
+				// Pass an empty string as ID here, so UpdateRecords reads
+				// the primary key from the struct itself
+				if updateErr := bc.UpdateRecords(model, ""); updateErr != nil {
+					return updateErr
+				}
+				return nil
+			}
 		}
-		return fmt.Errorf("failed to create user: %v", err)
+		// Return any other error (or the duplicate key error if overwrite==false)
+		return err
 	}
 
-	log.Printf("User created with username: %s", username)
+	// If record is created successfully, return nil
 	return nil
 }
 
-// CreateRecord inserts a new record into the database.
-//
-// This is a generic function that accepts any model struct.
-//
-// Parameters:
-// - model: A pointer to the struct representing the database table.
-//
-// Returns:
-// - An error if record creation fails.
-func (bc *BaseController) CreateRecord(model interface{}) error {
-	return bc.DB.Create(model).Error
+// isDuplicateKeyError checks if the error indicates a unique constraint violation.
+// Adjust the checks for your specific DB engine (MySQL, PostgreSQL, etc.).
+func isDuplicateKeyError(err error) bool {
+	// For PostgreSQL (error code 23505)
+	if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+		return true
+	}
+
+	// For MySQL, error code 1062 means 'Duplicate entry'
+	// A simple check could be:
+	if strings.Contains(err.Error(), "1062") {
+		return true
+	}
+
+	return false
 }
 
 // GetAllRecords retrieves all records of a given type with optional filters.
