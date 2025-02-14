@@ -80,6 +80,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "ApiKeyAuth": []
+                    },
+                    {
+                        "ApiKeyAuth.": []
                     }
                 ],
                 "description": "Setup routes for administrative resources like users, servers, employees, etc.",
@@ -167,6 +170,14 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/models.Example2"
                         }
+                    },
+                    {
+                        "description": "Example2 object to create",
+                        "name": "example2",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.Example2"
+                        }
                     }
                 ],
                 "responses": {}
@@ -220,6 +231,14 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/models.Example2"
                         }
+                    },
+                    {
+                        "description": "Example2 object to create",
+                        "name": "example2",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.Example2"
+                        }
                     }
                 ],
                 "responses": {}
@@ -263,6 +282,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "ApiKeyAuth": []
+                    },
+                    {
+                        "ApiKeyAuth.": []
                     }
                 ],
                 "description": "Setup routes for administrative resources like users, servers, employees, etc.",
@@ -339,6 +361,14 @@ const docTemplate = `{
                         "in": "body",
                         "schema": {
                             "$ref": "#/definitions/models.Example1"
+                        }
+                    },
+                    {
+                        "description": "Example2 object to create",
+                        "name": "example2",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.Example2"
                         }
                     },
                     {
