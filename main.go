@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/r4ulcl/api_template/api/controllers"
 	"github.com/r4ulcl/api_template/api/routes"
@@ -56,6 +57,7 @@ func main() {
 		Role:     "admin",
 		Password: cfg.AdminPassword,
 	}
+
 	user, err := authController.RegisterUser(user)
 	if err != nil {
 		log.Println("Error creating admin user")
@@ -66,9 +68,11 @@ func main() {
 	// Setup the router
 	r := routes.SetupRouter(controller, authController, cfg.JWTSecret)
 
-	// Start the HTTP server
-	log.Println("Starting server on :8080")
-	if err := http.ListenAndServe(":8080", r); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	srv := &http.Server{
+		Addr:         ":8080",
+		Handler:      r,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
+	log.Fatal(srv.ListenAndServe())
 }

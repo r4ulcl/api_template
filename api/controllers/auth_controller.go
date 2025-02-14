@@ -12,7 +12,7 @@ import (
 	"github.com/r4ulcl/api_template/utils/models"
 )
 
-// AuthController Struct for secret and database.BaseController
+// AuthController Struct for secret and database.BaseController.
 type AuthController struct {
 	Secret string
 	BC     *database.BaseController
@@ -40,6 +40,7 @@ func (ac *AuthController) RegisterUser(user models.User) (models.User, error) {
 	if err != nil {
 		return user, err
 	}
+
 	user.Password = hashedPass
 
 	// Assign role
@@ -67,7 +68,11 @@ func (ac *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 	var user models.User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid input"})
+
+		if err := json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid input"}); err != nil {
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+
 		return
 	}
 
@@ -91,7 +96,7 @@ func (ac *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Login existing user
+// Login existing user.
 func (ac *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -99,19 +104,23 @@ func (ac *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
+
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid input"})
+
 		return
 	}
 
 	// Fetch the user by primary key (username)
 	var user models.User
+
 	err := ac.BC.GetRecordsByID(&user, input.Username)
 	if err != nil {
 		// Either user not found or other DB error
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid username or password"})
+
 		return
 	}
 
@@ -119,6 +128,7 @@ func (ac *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 	if err := utils.CheckPassword(user.Password, input.Password); err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid username or password"})
+
 		return
 	}
 
@@ -127,6 +137,7 @@ func (ac *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Failed to generate token"})
+
 		return
 	}
 

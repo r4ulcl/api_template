@@ -19,7 +19,7 @@ const (
 type User struct {
 	// Username is the unique identifier for the user.
 	// It serves as the primary key in the database.
-	Username string `json:"username" gorm:"primaryKey"`
+	Username string `gorm:"primaryKey" json:"username"`
 
 	// Password stores the hashed password for authentication.
 	// The JSON tag omits this field in API responses for security reasons.

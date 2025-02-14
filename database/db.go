@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"reflect"
@@ -12,6 +13,8 @@ import (
 	"github.com/r4ulcl/api_template/utils/models"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	"gorm.io/gorm/schema"
 )
 
 // DB is the global database connection instance.
@@ -35,19 +38,29 @@ type BaseController struct {
 // This function also performs automatic migrations for all registered models.
 func ConnectDB(cfg *utils.Config) {
 	dsn := cfg.DSN() // Generate the database connection string
+
 	var db *gorm.DB
+
 	var err error
+
 	seconds := 5
 
 	// Retry connection up to 5 times
 	for attempts := 1; attempts <= 5; attempts++ {
-		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
+			SkipDefaultTransaction: true,
+			NamingStrategy:         schema.NamingStrategy{},
+			Logger:                 logger.Default.LogMode(logger.Silent),
+			NowFunc:                time.Now,
+		})
 		if err == nil {
 			log.Println("Connected to MySQL successfully.")
+
 			break
 		}
 
-		if attempts == 5 {
+		const maxRetries = 5
+		if attempts == maxRetries {
 			log.Fatalf("Failed to connect to MySQL after %d attempts: %v", attempts, err)
 		}
 
@@ -92,6 +105,7 @@ func (bc *BaseController) CreateOrUpdateRecord(model interface{}, overwrite bool
 				if updateErr := bc.UpdateRecords(model, ""); updateErr != nil {
 					return updateErr
 				}
+
 				return nil
 			}
 		}
@@ -107,7 +121,8 @@ func (bc *BaseController) CreateOrUpdateRecord(model interface{}, overwrite bool
 // Adjust the checks for your specific DB engine (MySQL, PostgreSQL, etc.).
 func isDuplicateKeyError(err error) bool {
 	// For PostgreSQL (error code 23505)
-	if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && pqErr.Code == "23505" {
 		return true
 	}
 
@@ -140,7 +155,7 @@ func (bc *BaseController) GetAllRecords(model interface{}, filters map[string]in
 	}
 
 	// Preload relationships dynamically
-	for i := 0; i < modelType.NumField(); i++ {
+	for i := range modelType.NumField() {
 		field := modelType.Field(i)
 		if gormTag, ok := field.Tag.Lookup("gorm"); ok && strings.Contains(gormTag, "foreignKey") {
 			tx = tx.Preload(field.Name)
@@ -166,7 +181,9 @@ func (bc *BaseController) GetRecordsByID(model interface{}, id string) error {
 	primaryKeys := getPrimaryKeyFields(model)
 
 	if len(primaryKeys) != len(parts) {
-		return fmt.Errorf("Mismatch between primary keys and tokenized ID")
+		ErrMismatch := errors.New("mismatch between primary keys and tokenized ID")
+
+		return fmt.Errorf("%w", ErrMismatch)
 	}
 
 	conditions := []interface{}{}
@@ -175,11 +192,13 @@ func (bc *BaseController) GetRecordsByID(model interface{}, id string) error {
 	}
 
 	if err := bc.DB.First(model, conditions...).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return fmt.Errorf("Record not found")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("Record not found")
 		}
+
 		return err
 	}
+
 	return nil
 }
 
@@ -193,6 +212,7 @@ func (bc *BaseController) GetRecordsByID(model interface{}, id string) error {
 // - An error if the record is not found or update fails.
 func (bc *BaseController) UpdateRecords(model interface{}, id string) error {
 	var primaryKeys []string
+
 	var keyValues []string
 
 	if id != "" {
@@ -201,21 +221,27 @@ func (bc *BaseController) UpdateRecords(model interface{}, id string) error {
 		primaryKeys = getJSONPrimaryKeys(model)
 
 		if len(primaryKeys) != len(parts) {
-			return fmt.Errorf("mismatch between number of primary keys and ID parts")
+			ErrMismatch := errors.New("mismatch between number of primary keys and ID parts")
+
+			return fmt.Errorf("%w", ErrMismatch)
 		}
 
 		keyValues = parts
 	} else {
 		// When ID is empty, extract primary key values from the model
 		var err error
+
 		keyValues, err = getPrimaryKeyValues(model)
 		if err != nil {
-			return fmt.Errorf("failed to get primary key values from model: %v", err)
+			ErrMismatch := errors.New("failed to get primary key values from model")
+
+			return fmt.Errorf("%w", ErrMismatch)
 		}
+
 		primaryKeys = getJSONPrimaryKeys(model)
 
 		if len(primaryKeys) == 0 {
-			return fmt.Errorf("no primary keys found in the model")
+			return errors.New("no primary keys found in the model")
 		}
 	}
 
@@ -227,9 +253,10 @@ func (bc *BaseController) UpdateRecords(model interface{}, id string) error {
 
 	// Attempt to find the existing record
 	if err := query.First(model).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return fmt.Errorf("record not found")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("record not found")
 		}
+
 		return err
 	}
 
@@ -264,18 +291,21 @@ func (bc *BaseController) DeleteRecords(model interface{}, id string) error {
 	// Reflect on the `model` pointer to reach its underlying struct fields.
 	val := reflect.ValueOf(model)
 	if val.Kind() != reflect.Ptr || val.IsNil() {
-		return fmt.Errorf("model must be a non-nil pointer to a struct")
+		return errors.New("model must be a non-nil pointer to a struct")
 	}
+
 	elem := val.Elem()
 	if elem.Kind() != reflect.Struct {
-		return fmt.Errorf("model must point to a struct")
+		return errors.New("model must point to a struct")
 	}
 
 	// We'll iterate through fields in the struct in the same order as `getJSONPrimaryKeys`.
 	// Each time we find a primaryKey field, we assign the corresponding `parts[i]`.
 	pkCount := 0
-	for i := 0; i < elem.NumField(); i++ {
+
+	for i := range elem.NumField() {
 		fieldType := elem.Type().Field(i)
+
 		gormTag := fieldType.Tag.Get("gorm")
 		if strings.Contains(gormTag, "primaryKey") {
 			// This field is a primary key. We set its value to parts[pkCount].
@@ -286,6 +316,7 @@ func (bc *BaseController) DeleteRecords(model interface{}, id string) error {
 			}
 			// For simplicity, assume string primary keys. Adjust if numeric.
 			fieldValue.SetString(parts[pkCount])
+
 			pkCount++
 		}
 	}
@@ -308,27 +339,30 @@ func (bc *BaseController) DeleteRecords(model interface{}, id string) error {
 // getPrimaryKeyFields extracts the GORM primary key fields from a struct.
 func getPrimaryKeyFields(model interface{}) []string {
 	var primaryKeys []string
+
 	val := reflect.ValueOf(model).Elem()
 	typ := val.Type()
 
-	for i := 0; i < val.NumField(); i++ {
+	for i := range val.NumField() {
 		field := typ.Field(i)
 		if tag := field.Tag.Get("gorm"); strings.Contains(tag, "primaryKey") {
 			primaryKeys = append(primaryKeys, field.Name)
 		}
 	}
+
 	return primaryKeys
 }
 
 // getJSONPrimaryKeys extracts JSON field names for primary keys.
 func getJSONPrimaryKeys(model interface{}) []string {
 	var keys []string
+
 	typ := reflect.TypeOf(model)
 	if typ.Kind() == reflect.Ptr {
 		typ = typ.Elem()
 	}
 
-	for i := 0; i < typ.NumField(); i++ {
+	for i := range typ.NumField() {
 		field := typ.Field(i)
 		if strings.Contains(field.Tag.Get("gorm"), "primaryKey") {
 			jsonTag := field.Tag.Get("json")
@@ -337,12 +371,14 @@ func getJSONPrimaryKeys(model interface{}) []string {
 			keys = append(keys, jsonField)
 		}
 	}
+
 	return keys
 }
 
 // getPrimaryKeyValues extracts the primary key values from the model.
 func getPrimaryKeyValues(model interface{}) ([]string, error) {
 	var values []string
+
 	val := reflect.ValueOf(model).Elem()
 	primaryKeys := getPrimaryKeyFields(model)
 
@@ -354,5 +390,6 @@ func getPrimaryKeyValues(model interface{}) ([]string, error) {
 		// Convert the field value to string
 		values = append(values, fmt.Sprintf("%v", fieldVal.Interface()))
 	}
+
 	return values, nil
 }

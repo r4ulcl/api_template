@@ -39,15 +39,18 @@ func AuthMiddleware(secret string) func(http.Handler) http.Handler {
 			if authHeader == "" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Authorization header missing"})
+
 				return
 			}
 
 			// Extract token from "Bearer " prefix
 			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
 			claims, err := utils.ParseJWT(tokenString, secret)
 			if err != nil {
 				w.WriteHeader(http.StatusUnauthorized)
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid token"})
+
 				return
 			}
 
@@ -78,6 +81,7 @@ func AdminOnly(next http.Handler) http.Handler {
 		if role != "admin" {
 			w.WriteHeader(http.StatusForbidden)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Forbidden: Admins only"})
+
 			return
 		}
 

@@ -12,19 +12,10 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
-// SetupRouter sets up Gorilla Mux with our handlers and Swagger
-// @Summary Login and generate JWT token
-// @Description Login using username and password, and return a JWT token for authorized access
-// @Tags authentication
-// @Accept json
-// @Produce json
-// @Param body body models.LoginRequest true "Login request with username and password"
-// @Success 200 {object} models.JWTResponse
-// @Failure 400 {string} string "Invalid input"
-// @Failure 401 {Object} models.ErrorResponse "Unauthorized"
-// @Router /login [post]
-// @security ApiKeyAuth
-func SetupRouter(baseController *controllers.Controller, authController *controllers.AuthController, jwtSecret string) *mux.Router {
+// @security ApiKeyAuth.
+func SetupRouter(baseController *controllers.Controller, authController *controllers.AuthController,
+	jwtSecret string,
+) *mux.Router {
 	r := mux.NewRouter()
 
 	r.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)
@@ -56,21 +47,15 @@ func SetupRouter(baseController *controllers.Controller, authController *control
 	resourcesAdmin := []string{"user", "example1", "example2", "exampleRelational"}
 	// Separated to have different Swagger comments
 	setupURLAdminResourceRoutes(adminOnly, baseController, rootAdmin, resourcesAdmin, modelMap)
-	setupBodyAdminResourceRoutes(adminOnly, baseController, authController, rootAdmin, resourcesAdmin, modelMap)
+	setupBodyAdminResourceRoutes(adminOnly, baseController, rootAdmin, resourcesAdmin, modelMap)
 
 	return r
 }
 
-// setupURLResourceRoutes sets up the common routes for CRUD operations for resources
-// @Summary Setup GET resource routes
-// @Tags user
-// @Description Setup routes for CRUD operations on resources like users, servers, employees, etc.
-// @Param resource path string true "Resource type" Enums(example1, example2, exampleRelational)
-// @Param id path string false "Resource ID (for operations on specific resources)"
-// @Router /{resource} [get]
-// @Router /{resource}/{id} [get]
-// @security ApiKeyAuth
-func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controller, root string, resources []string, modelMap map[string]interface{}) {
+// @security ApiKeyAuth.
+func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controller,
+	root string, resources []string, modelMap map[string]interface{},
+) {
 	for _, resource := range resources {
 		resourcePath := root + resource
 		log.Println("resourcePath setupResourceRoutes", resourcePath)
@@ -79,6 +64,7 @@ func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controll
 			modelType := modelMap[resource]
 			if modelType == nil {
 				http.Error(w, "Invalid resource", http.StatusBadRequest)
+
 				return
 			}
 
@@ -93,6 +79,7 @@ func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controll
 			modelType := modelMap[resource]
 			if modelType == nil {
 				http.Error(w, "Invalid resource", http.StatusBadRequest)
+
 				return
 			}
 
@@ -102,16 +89,10 @@ func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controll
 	}
 }
 
-// setupURLAdminResourceRoutes sets up the admin routes for resources like /users, /servers, /employee, /groups, etc.
-// @Summary Setup admin routes
-// @Tags admin
-// @Description Setup routes for administrative resources like users, servers, employees, etc.
-// @Param resource path string true "Resource type" Enums(user, example1, example2, exampleRelational)
-// @Param id path string false "Resource ID (for operations on specific resources)"
-// @Router /user [get]                     // GET route: No body parameter
-// @Router /{resource}/{id} [delete]       // DELETE route: No body parameter
-// @security ApiKeyAuth
-func setupURLAdminResourceRoutes(router *mux.Router, controller *controllers.Controller, root string, resources []string, modelMap map[string]interface{}) {
+// @security ApiKeyAuth.
+func setupURLAdminResourceRoutes(router *mux.Router, controller *controllers.Controller,
+	root string, resources []string, modelMap map[string]interface{},
+) {
 	for _, resource := range resources {
 		resourcePath := root + resource
 
@@ -121,6 +102,7 @@ func setupURLAdminResourceRoutes(router *mux.Router, controller *controllers.Con
 				modelType := modelMap[resource]
 				if modelType == nil {
 					http.Error(w, "Invalid resource", http.StatusBadRequest)
+
 					return
 				}
 				sliceValue := reflect.New(reflect.SliceOf(reflect.TypeOf(modelType).Elem())).Interface()
@@ -132,6 +114,7 @@ func setupURLAdminResourceRoutes(router *mux.Router, controller *controllers.Con
 			modelType := modelMap[resource]
 			if modelType == nil {
 				http.Error(w, "Invalid resource", http.StatusBadRequest)
+
 				return
 			}
 			controller.Delete(w, r, modelType)
@@ -139,20 +122,10 @@ func setupURLAdminResourceRoutes(router *mux.Router, controller *controllers.Con
 	}
 }
 
-// setupBodyAdminResourceRoutes sets up the admin routes for resources like /users, /servers, /employee, /groups, etc.
-// @Summary Setup admin routes
-// @Tags admin
-// @Description Setup routes for administrative resources like users, servers, employees, etc.
-// @Param resource path string true "Resource type" Enums(user, example1, example2, exampleRelational)
-// @Param id path string false "Resource ID (for operations on specific resources)"
-// @security ApiKeyAuth
-// @Router /{resource} [post]
-// @Router /{resource} [put]
-// @Router /{resource}/{id} [patch]
-// @Param defaultRequest body models.DefaultRequest true "JSON request body for POST and PATCH operations"
-// @param example1 body models.Example1 false "Example1 object to create"
-// @param example2 body models.Example2 false "Example2 object to create"
-func setupBodyAdminResourceRoutes(router *mux.Router, controller *controllers.Controller, authController *controllers.AuthController, root string, resources []string, modelMap map[string]interface{}) {
+// @param example2 body models.Example2 false "Example2 object to create".
+func setupBodyAdminResourceRoutes(router *mux.Router, controller *controllers.Controller,
+	root string, resources []string, modelMap map[string]interface{},
+) {
 	for _, resource := range resources {
 		resourcePath := root + resource
 
@@ -161,6 +134,7 @@ func setupBodyAdminResourceRoutes(router *mux.Router, controller *controllers.Co
 			modelType := modelMap[resource]
 			if modelType == nil {
 				http.Error(w, "Invalid resource", http.StatusBadRequest)
+
 				return
 			}
 			overwrite := false
@@ -172,6 +146,7 @@ func setupBodyAdminResourceRoutes(router *mux.Router, controller *controllers.Co
 			modelType := modelMap[resource]
 			if modelType == nil {
 				http.Error(w, "Invalid resource", http.StatusBadRequest)
+
 				return
 			}
 			overwrite := true
@@ -182,6 +157,7 @@ func setupBodyAdminResourceRoutes(router *mux.Router, controller *controllers.Co
 			modelType := modelMap[resource]
 			if modelType == nil {
 				http.Error(w, "Invalid resource", http.StatusBadRequest)
+
 				return
 			}
 			controller.Update(w, r, modelType)

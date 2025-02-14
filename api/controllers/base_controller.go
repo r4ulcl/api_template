@@ -36,6 +36,7 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 	if err := json.NewDecoder(r.Body).Decode(model); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+
 		return
 	}
 
@@ -44,6 +45,7 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 		// If it's a duplicate key error and overwrite == false, or any other DB error
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+
 		return
 	}
 
@@ -80,6 +82,7 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 	if err := c.BC.GetAllRecords(model, filters); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+
 		return
 	}
 
@@ -108,6 +111,7 @@ func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model inter
 	if err := c.BC.GetRecordsByID(model, tokenizedID); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+
 		return
 	}
 
@@ -138,12 +142,14 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 	if err := json.NewDecoder(r.Body).Decode(model); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+
 		return
 	}
 
 	if err := c.BC.UpdateRecords(model, tokenizedID); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+
 		return
 	}
 
@@ -170,6 +176,7 @@ func (c *Controller) Delete(w http.ResponseWriter, r *http.Request, model interf
 	if err := c.BC.DeleteRecords(model, tokenizedID); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+
 		return
 	}
 

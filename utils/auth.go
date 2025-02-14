@@ -14,6 +14,7 @@ import (
 // during hashing.
 func HashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+
 	return string(bytes), err
 }
 
@@ -38,6 +39,7 @@ func GenerateJWT(username string, role string, secret string) (string, error) {
 		"exp":      time.Now().Add(time.Hour * 240).Unix(), // 24-hour expiration
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
 	return token.SignedString([]byte(secret))
 }
 
@@ -50,9 +52,9 @@ func ParseJWT(tokenString, secret string) (jwt.MapClaims, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("invalid signing method")
 		}
+
 		return []byte(secret), nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -60,5 +62,6 @@ func ParseJWT(tokenString, secret string) (jwt.MapClaims, error) {
 	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
 		return claims, nil
 	}
+
 	return nil, errors.New("invalid token")
 }

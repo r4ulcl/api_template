@@ -5,10 +5,10 @@ package models
 // It contains the username and password fields, both of which are required.
 type LoginRequest struct {
 	// Username is the unique identifier for the user attempting to log in.
-	Username string `json:"username" binding:"required"`
+	Username string `binding:"required" json:"username"`
 
 	// Password is the user's password used for authentication.
-	Password string `json:"password" binding:"required"`
+	Password string `binding:"required" json:"password"`
 }
 
 // JWTResponse represents the response containing a JWT token.
@@ -24,10 +24,10 @@ type JWTResponse struct {
 // It contains the username, password, and role of the new user.
 type RegisterRequest struct {
 	// Username is the unique identifier for the new user.
-	Username string `json:"username" binding:"required"`
+	Username string `binding:"required" json:"username"`
 
 	// Password is the new user's password, which will be hashed before storage.
-	Password string `json:"password" binding:"required"`
+	Password string `binding:"required" json:"password"`
 
 	// Role specifies whether the user is an "admin" or "user".
 	Role Role `json:"role"`
