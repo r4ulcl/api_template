@@ -5,38 +5,35 @@ services:
   # MySQL Database Service
   # ----------------------------------------------------------
   db:
-    image: mysql:8.0  # Use the official MySQL 8.0 image
-    container_name: mysql_db  # Assign a custom container name
-    restart: always  # Ensure the container restarts on failure
+    image: mysql:8.0
+    container_name: mysql_db
+    restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: example  # Root password for MySQL
-      MYSQL_DATABASE: demo_db        # Name of the database to be created
-      MYSQL_USER: demo_user          # Username for application access
-      MYSQL_PASSWORD: demo_pass      # Password for the application user
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
-      - "3306:3306"  # Map MySQL port to the host for external connections
+      - "3306:3306"
     volumes:
-      - ./mysql_data:/var/lib/mysql  # Persist database data
+      - ./mysql_data:/var/lib/mysql
 
   # ----------------------------------------------------------
   # Go Application Service
   # ----------------------------------------------------------
   app:
-    build: .  # Build the application from the current directory (Dockerfile)
-    container_name: go_app  # Assign a custom container name
-    restart: always  # Ensure the container restarts on failure
+    build: .
+    container_name: go_app
+    restart: always
     depends_on:
-      - db  # Ensure the database service starts before the application
+      - db
     ports:
-      - "8080:8080"  # Map application port 8080 to host port 8080
+      - "8080:8080"
     environment:
-      # Database configuration (should match MySQL service settings)
-      DB_HOST: db  # The hostname of the MySQL container
-      DB_PORT: "3306"  # MySQL port
-      DB_USER: demo_user  # Application database user
-      DB_PASSWORD: demo_pass  # Application database password
-      DB_NAME: demo_db  # Database name
-
-      # Security and authentication settings
-      JWT_SECRET: your_jwt_secret_key  # Secret key for JWT authentication
-      ADMIN_PASSWORD: SuperSecurePassword  # Initial admin password
+      DB_HOST: db
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_NAME: ${MYSQL_DATABASE}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
