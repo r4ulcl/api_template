@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gorilla/handlers"
 	"github.com/r4ulcl/api_template/api/controllers"
 	"github.com/r4ulcl/api_template/api/routes"
 	"github.com/r4ulcl/api_template/database"
@@ -43,36 +44,65 @@ func main() {
 	// Load application configuration
 	cfg := utils.LoadConfig()
 
-	// Connect to the database using loaded configuration
+	// Connect to the database
 	database.ConnectDB(cfg)
 
-	// Initialize controllers
-	authController := &controllers.AuthController{Secret: cfg.JWTSecret}
+	// Initialize BaseController (holds the DB instance)
 	baseController := &database.BaseController{DB: database.DB}
+
+	// Initialize controllers
+	authController := &controllers.AuthController{
+		Secret: cfg.JWTSecret,
+		BC:     baseController,
+	}
 	controller := &controllers.Controller{BC: baseController}
 
+	// Create an initial admin user if not already present
 	username := "admin"
-	user := models.User{
+	adminUser := &models.User{
 		Username: username,
-		Role:     "admin",
+		Role:     models.AdminRole,
 		Password: cfg.AdminPassword,
 	}
 
-	user, err := authController.RegisterUser(user)
+	createdUser, err := authController.RegisterUser(adminUser)
 	if err != nil {
-		log.Println("Error creating admin user")
+		log.Printf("Error creating admin user: %v\n", err)
 	} else {
-		log.Println("User created: ", user)
+		log.Printf("Admin user created: %+v\n", createdUser)
 	}
 
-	// Setup the router
+	// Build the router (this already installs CORSMethodMiddleware internally)
 	r := routes.SetupRouter(controller, authController, cfg.JWTSecret)
 
+	// Wrap the router in gorilla/handlers.CORS so that:
+	// 1) every response (including auto‐OPTIONS) carries the CORS headers, and
+	// 2) the preflight (OPTIONS) will be allowed through.
+	corsHandler := handlers.CORS(
+		handlers.AllowedOrigins([]string{"*"}), // You can restrict to your front‐end origin here.
+		handlers.AllowedMethods([]string{
+			http.MethodGet,
+			http.MethodPost,
+			http.MethodPut,
+			http.MethodPatch,
+			http.MethodDelete,
+			http.MethodOptions,
+		}),
+		handlers.AllowedHeaders([]string{
+			"Authorization",
+			"Content-Type",
+			"X-Requested-With",
+		}),
+	)
+
+	// Create the HTTP server on port 7080 (to match your curl)
 	srv := &http.Server{
 		Addr:         ":8080",
-		Handler:      r,
+		Handler:      corsHandler(r),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
+
+	log.Println("Server starting on :8080")
 	log.Fatal(srv.ListenAndServe())
 }

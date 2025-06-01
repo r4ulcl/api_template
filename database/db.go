@@ -177,25 +177,28 @@ func (bc *BaseController) GetAllRecords(model interface{}, filters map[string]in
 // Returns:
 // - An error if the record is not found.
 func (bc *BaseController) GetRecordsByID(model interface{}, id string) error {
+	log.Println("GetRecordsByID", model, id)
 	parts := strings.Split(id, "-")
 	primaryKeys := getPrimaryKeyFields(model)
 
+	log.Println("GetRecordsByID primaryKeys", primaryKeys)
+
 	if len(primaryKeys) != len(parts) {
-		ErrMismatch := errors.New("mismatch between primary keys and tokenized ID")
-
-		return fmt.Errorf("%w", ErrMismatch)
+		return fmt.Errorf("mismatch between primary keys and tokenized ID")
 	}
 
-	conditions := []interface{}{}
-	for i := range primaryKeys {
-		conditions = append(conditions, parts[i])
+	// Build a map[columnName]value
+	pkMap := make(map[string]interface{}, len(primaryKeys))
+	for i, col := range primaryKeys {
+		pkMap[col] = parts[i]
 	}
+	log.Println("GetRecordsByID pkMap", pkMap)
 
-	if err := bc.DB.First(model, conditions...).Error; err != nil {
+	// GORM will translate the map into `WHERE col1 = ? AND col2 = ? ...`
+	if err := bc.DB.First(model, pkMap).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errors.New("Record not found")
+			return errors.New("record not found")
 		}
-
 		return err
 	}
 

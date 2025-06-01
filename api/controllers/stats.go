@@ -1,0 +1,160 @@
+package controllers
+
+import (
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"github.com/r4ulcl/api_template/utils/models"
+)
+
+// TableStats holds detailed statistics for a single table.
+type TableStats struct {
+	TableName      string     `json:"table_name"`
+	RowCount       uint64     `json:"row_count"`             // approximate row count
+	DataSize       uint64     `json:"data_size_bytes"`       // DATA_LENGTH
+	IndexSize      uint64     `json:"index_size_bytes"`      // INDEX_LENGTH
+	DataFree       uint64     `json:"data_free_bytes"`       // DATA_FREE
+	MaxDataLength  uint64     `json:"max_data_length_bytes"` // MAX_DATA_LENGTH
+	AutoIncrement  uint64     `json:"auto_increment"`        // AUTO_INCREMENT
+	Engine         string     `json:"engine"`                // storage engine (InnoDB, MyISAM, etc.)
+	TableCollation string     `json:"table_collation"`       // TABLE_COLLATION
+	RowFormat      string     `json:"row_format"`            // ROW_FORMAT
+	TableType      string     `json:"table_type"`            // BASE TABLE, VIEW, etc.
+	TableComment   string     `json:"table_comment"`         // any comment on the table
+	CreateTime     *time.Time `json:"create_time,omitempty"` // CREATE_TIME (can be null)
+	UpdateTime     *time.Time `json:"update_time,omitempty"` // UPDATE_TIME (can be null)
+	CheckTime      *time.Time `json:"check_time,omitempty"`  // CHECK_TIME (can be null)
+	ColumnCount    uint64     `json:"column_count"`          // number of columns in the table
+	IndexCount     uint64     `json:"index_count"`           // number of distinct indexes
+	TotalSize      uint64     `json:"total_size_bytes"`      // DataSize + IndexSize
+	// ExactRowCount int64      `json:"exact_row_count,omitempty"` // uncomment if you want a precise COUNT(*)
+}
+
+// GetDBStats retrieves, for each table in the current schema:
+//   - table name
+//   - approximate row count (from information_schema.TABLE_ROWS)
+//   - DATA_LENGTH, INDEX_LENGTH, DATA_FREE, MAX_DATA_LENGTH, AUTO_INCREMENT
+//   - ENGINE, TABLE_COLLATION, ROW_FORMAT, TABLE_TYPE, TABLE_COMMENT
+//   - CREATE_TIME, UPDATE_TIME, CHECK_TIME
+//   - column_count (number of columns in that table)
+//   - index_count (number of distinct indexes on that table)
+//   - total_size_bytes (data + index size)
+//
+// Optionally, you can also uncomment the loop at the bottom to populate a precise COUNT(*) per table.
+//
+// Returns a JSON array of TableStats. On any error, it responds with HTTP 500 + ErrorResponse.
+func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// 1. Find the current database/schema in use
+	dbName := c.BC.DB.Migrator().CurrentDatabase()
+
+	// 2. Query information_schema.tables, plus subqueries for column & index counts
+	type rawStat struct {
+		TableName      string     `gorm:"column:TABLE_NAME"`
+		TableRows      uint64     `gorm:"column:TABLE_ROWS"`
+		DataLength     uint64     `gorm:"column:DATA_LENGTH"`
+		IndexLength    uint64     `gorm:"column:INDEX_LENGTH"`
+		DataFree       uint64     `gorm:"column:DATA_FREE"`
+		MaxDataLength  uint64     `gorm:"column:MAX_DATA_LENGTH"`
+		AutoIncrement  uint64     `gorm:"column:AUTO_INCREMENT"`
+		Engine         string     `gorm:"column:ENGINE"`
+		TableCollation string     `gorm:"column:TABLE_COLLATION"`
+		RowFormat      string     `gorm:"column:ROW_FORMAT"`
+		TableType      string     `gorm:"column:TABLE_TYPE"`
+		TableComment   string     `gorm:"column:TABLE_COMMENT"`
+		CreateTime     *time.Time `gorm:"column:CREATE_TIME"`
+		UpdateTime     *time.Time `gorm:"column:UPDATE_TIME"`
+		CheckTime      *time.Time `gorm:"column:CHECK_TIME"`
+		ColumnCount    uint64     `gorm:"column:COLUMN_COUNT"`
+		IndexCount     uint64     `gorm:"column:INDEX_COUNT"`
+	}
+
+	var rawStats []rawStat
+	err := c.BC.DB.
+		Raw(`
+			SELECT
+				t.TABLE_NAME,
+				IFNULL(t.TABLE_ROWS, 0)           AS TABLE_ROWS,
+				IFNULL(t.DATA_LENGTH, 0)          AS DATA_LENGTH,
+				IFNULL(t.INDEX_LENGTH, 0)         AS INDEX_LENGTH,
+				IFNULL(t.DATA_FREE, 0)            AS DATA_FREE,
+				IFNULL(t.MAX_DATA_LENGTH, 0)      AS MAX_DATA_LENGTH,
+				IFNULL(t.AUTO_INCREMENT, 0)       AS AUTO_INCREMENT,
+				IFNULL(t.ENGINE, '')              AS ENGINE,
+				IFNULL(t.TABLE_COLLATION, '')     AS TABLE_COLLATION,
+				IFNULL(t.ROW_FORMAT, '')          AS ROW_FORMAT,
+				IFNULL(t.TABLE_TYPE, '')          AS TABLE_TYPE,
+				IFNULL(t.TABLE_COMMENT, '')       AS TABLE_COMMENT,
+				t.CREATE_TIME,
+				t.UPDATE_TIME,
+				t.CHECK_TIME,
+				(
+					SELECT COUNT(*)
+					FROM information_schema.columns c
+					WHERE c.table_schema = t.table_schema
+					  AND c.table_name   = t.table_name
+				) AS COLUMN_COUNT,
+				(
+					SELECT COUNT(DISTINCT s.INDEX_NAME)
+					FROM information_schema.statistics s
+					WHERE s.table_schema = t.table_schema
+					  AND s.table_name   = t.table_name
+				) AS INDEX_COUNT
+			FROM information_schema.tables t
+			WHERE t.table_schema = ?
+		`, dbName).
+		Scan(&rawStats).
+		Error
+
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	// 3. Build the final slice of TableStats
+	stats := make([]TableStats, 0, len(rawStats))
+	for _, rs := range rawStats {
+		stats = append(stats, TableStats{
+			TableName:      rs.TableName,
+			RowCount:       rs.TableRows,
+			DataSize:       rs.DataLength,
+			IndexSize:      rs.IndexLength,
+			DataFree:       rs.DataFree,
+			MaxDataLength:  rs.MaxDataLength,
+			AutoIncrement:  rs.AutoIncrement,
+			Engine:         rs.Engine,
+			TableCollation: rs.TableCollation,
+			RowFormat:      rs.RowFormat,
+			TableType:      rs.TableType,
+			TableComment:   rs.TableComment,
+			CreateTime:     rs.CreateTime,
+			UpdateTime:     rs.UpdateTime,
+			CheckTime:      rs.CheckTime,
+			ColumnCount:    rs.ColumnCount,
+			IndexCount:     rs.IndexCount,
+			TotalSize:      rs.DataLength + rs.IndexLength,
+		})
+	}
+
+	// 4. (Optional) To get an exact COUNT(*) per table instead of the TABLE_ROWS estimate,
+	//    uncomment the following loop. Note: this issues one SELECT COUNT(*) per table,
+	//    which can be slow on large datasets.
+	/*
+		for i := range stats {
+			var exact int64
+			if err := c.BC.DB.Table(stats[i].TableName).Count(&exact).Error; err == nil {
+				stats[i].ExactRowCount = exact
+			}
+		}
+	*/
+
+	// 5. Send the JSON response
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		return
+	}
+}
