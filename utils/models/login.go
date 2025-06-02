@@ -23,7 +23,7 @@ type User struct {
 
 	// Password stores the hashed password for authentication.
 	// The JSON tag omits this field in API responses for security reasons.
-	Password string `json:"-"`
+	Password string `json:"password"`
 
 	// Role defines the user's permissions, either "admin" or "user".
 	Role Role `json:"role"`
