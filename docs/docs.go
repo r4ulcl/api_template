@@ -172,11 +172,11 @@ const docTemplate = `{
                         }
                     },
                     {
-                        "description": "Example2 object to create",
-                        "name": "example2",
+                        "description": "ExampleRelational object to create",
+                        "name": "ExampleRelational",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/models.Example2"
+                            "$ref": "#/definitions/models.ExampleRelational"
                         }
                     }
                 ],
@@ -233,11 +233,11 @@ const docTemplate = `{
                         }
                     },
                     {
-                        "description": "Example2 object to create",
-                        "name": "example2",
+                        "description": "ExampleRelational object to create",
+                        "name": "ExampleRelational",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/models.Example2"
+                            "$ref": "#/definitions/models.ExampleRelational"
                         }
                     }
                 ],
@@ -372,11 +372,11 @@ const docTemplate = `{
                         }
                     },
                     {
-                        "description": "Example2 object to create",
-                        "name": "example2",
+                        "description": "ExampleRelational object to create",
+                        "name": "ExampleRelational",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/models.Example2"
+                            "$ref": "#/definitions/models.ExampleRelational"
                         }
                     }
                 ],
@@ -414,6 +414,39 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "field2": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.ExampleRelational": {
+            "type": "object",
+            "properties": {
+                "example1Reference": {
+                    "description": "Example1Reference establishes a foreign key relationship with Example1.\nUpdates and deletions on Example1 cascade to ExampleRelational.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.Example1"
+                        }
+                    ]
+                },
+                "example1_field1": {
+                    "description": "Example1Field1 is a foreign key referencing Example1.",
+                    "type": "string"
+                },
+                "example2Reference": {
+                    "description": "Example2Reference establishes a foreign key relationship with Example2.\nUpdates and deletions on Example2 cascade to ExampleRelational.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.Example2"
+                        }
+                    ]
+                },
+                "example2_field1": {
+                    "description": "Example2Field1 is a foreign key referencing Example2.",
+                    "type": "string"
+                },
+                "field3": {
+                    "description": "Field3 stores additional relationship-related information.",
                     "type": "string"
                 }
             }

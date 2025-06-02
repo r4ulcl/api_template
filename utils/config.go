@@ -14,6 +14,7 @@ type Config struct {
 	DBName        string // Database name (e.g., "demo_db")
 	JWTSecret     string // JWT secret key for token signing
 	AdminPassword string // Admin password (e.g., "admin_secret")
+	UserGUI       string // Allow user to access stats
 }
 
 // LoadConfig loads environment variables or uses default values for database and authentication configuration.
@@ -26,6 +27,7 @@ func LoadConfig() *Config {
 		DBName:        getEnv("DB_NAME", "demo_db"),                // Default: demo_db
 		JWTSecret:     getEnv("JWT_SECRET", "your_jwt_secret_key"), // Default: "your_jwt_secret_key"
 		AdminPassword: getEnv("ADMIN_PASSWORD", ""),                // Default: empty string
+		UserGUI:       getEnv("USER_GUI", "false"),
 	}
 }
 

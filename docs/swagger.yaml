@@ -23,6 +23,30 @@ definitions:
       field2:
         type: string
     type: object
+  models.ExampleRelational:
+    properties:
+      example1_field1:
+        description: Example1Field1 is a foreign key referencing Example1.
+        type: string
+      example1Reference:
+        allOf:
+        - $ref: '#/definitions/models.Example1'
+        description: |-
+          Example1Reference establishes a foreign key relationship with Example1.
+          Updates and deletions on Example1 cascade to ExampleRelational.
+      example2_field1:
+        description: Example2Field1 is a foreign key referencing Example2.
+        type: string
+      example2Reference:
+        allOf:
+        - $ref: '#/definitions/models.Example2'
+        description: |-
+          Example2Reference establishes a foreign key relationship with Example2.
+          Updates and deletions on Example2 cascade to ExampleRelational.
+      field3:
+        description: Field3 stores additional relationship-related information.
+        type: string
+    type: object
   models.JWTResponse:
     properties:
       token:
@@ -106,11 +130,11 @@ paths:
         name: example2
         schema:
           $ref: '#/definitions/models.Example2'
-      - description: Example2 object to create
+      - description: ExampleRelational object to create
         in: body
-        name: example2
+        name: ExampleRelational
         schema:
-          $ref: '#/definitions/models.Example2'
+          $ref: '#/definitions/models.ExampleRelational'
       responses: {}
       security:
       - ApiKeyAuth: []
@@ -147,11 +171,11 @@ paths:
         name: example2
         schema:
           $ref: '#/definitions/models.Example2'
-      - description: Example2 object to create
+      - description: ExampleRelational object to create
         in: body
-        name: example2
+        name: ExampleRelational
         schema:
-          $ref: '#/definitions/models.Example2'
+          $ref: '#/definitions/models.ExampleRelational'
       responses: {}
       security:
       - ApiKeyAuth: []
@@ -241,11 +265,11 @@ paths:
         name: example2
         schema:
           $ref: '#/definitions/models.Example2'
-      - description: Example2 object to create
+      - description: ExampleRelational object to create
         in: body
-        name: example2
+        name: ExampleRelational
         schema:
-          $ref: '#/definitions/models.Example2'
+          $ref: '#/definitions/models.ExampleRelational'
       responses: {}
       security:
       - ApiKeyAuth: []

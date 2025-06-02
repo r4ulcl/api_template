@@ -2,16 +2,17 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/r4ulcl/api_template/utils/models"
 )
 
-// TableStats holds detailed statistics for a single table.
+// TableStats holds detailed statistics for a single table, including its PK columns.
 type TableStats struct {
 	TableName      string     `json:"table_name"`
-	RowCount       uint64     `json:"row_count"`             // approximate row count
+	ExactRowCount  int64      `json:"exact_row_count"`       // exact COUNT(*) at the time of the request
 	DataSize       uint64     `json:"data_size_bytes"`       // DATA_LENGTH
 	IndexSize      uint64     `json:"index_size_bytes"`      // INDEX_LENGTH
 	DataFree       uint64     `json:"data_free_bytes"`       // DATA_FREE
@@ -26,34 +27,32 @@ type TableStats struct {
 	UpdateTime     *time.Time `json:"update_time,omitempty"` // UPDATE_TIME (can be null)
 	CheckTime      *time.Time `json:"check_time,omitempty"`  // CHECK_TIME (can be null)
 	ColumnCount    uint64     `json:"column_count"`          // number of columns in the table
-	IndexCount     uint64     `json:"index_count"`           // number of distinct indexes
+	IndexCount     uint64     `json:"index_count"`           // number of distinct indexes on that table
 	TotalSize      uint64     `json:"total_size_bytes"`      // DataSize + IndexSize
-	// ExactRowCount int64      `json:"exact_row_count,omitempty"` // uncomment if you want a precise COUNT(*)
+	PrimaryKey     string     `json:"primary_key"`           // comma-separated list of PK column(s)
 }
 
 // GetDBStats retrieves, for each table in the current schema:
-//   - table name
-//   - approximate row count (from information_schema.TABLE_ROWS)
+//   - exact row count (via SELECT COUNT(*))
 //   - DATA_LENGTH, INDEX_LENGTH, DATA_FREE, MAX_DATA_LENGTH, AUTO_INCREMENT
 //   - ENGINE, TABLE_COLLATION, ROW_FORMAT, TABLE_TYPE, TABLE_COMMENT
 //   - CREATE_TIME, UPDATE_TIME, CHECK_TIME
 //   - column_count (number of columns in that table)
 //   - index_count (number of distinct indexes on that table)
+//   - primary_key (all PK columns comma‐separated)
 //   - total_size_bytes (data + index size)
-//
-// Optionally, you can also uncomment the loop at the bottom to populate a precise COUNT(*) per table.
 //
 // Returns a JSON array of TableStats. On any error, it responds with HTTP 500 + ErrorResponse.
 func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// 1. Find the current database/schema in use
+	// 1. Determine the current database/schema
 	dbName := c.BC.DB.Migrator().CurrentDatabase()
 
-	// 2. Query information_schema.tables, plus subqueries for column & index counts
+	// 2. Query information_schema.tables for everything except TABLE_ROWS
+	//    (we will do COUNT(*) below for each table to get the real-time row count).
 	type rawStat struct {
 		TableName      string     `gorm:"column:TABLE_NAME"`
-		TableRows      uint64     `gorm:"column:TABLE_ROWS"`
 		DataLength     uint64     `gorm:"column:DATA_LENGTH"`
 		IndexLength    uint64     `gorm:"column:INDEX_LENGTH"`
 		DataFree       uint64     `gorm:"column:DATA_FREE"`
@@ -69,6 +68,7 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		CheckTime      *time.Time `gorm:"column:CHECK_TIME"`
 		ColumnCount    uint64     `gorm:"column:COLUMN_COUNT"`
 		IndexCount     uint64     `gorm:"column:INDEX_COUNT"`
+		PKColumns      string     `gorm:"column:PRIMARY_KEY"` // comma‐separated PK names
 	}
 
 	var rawStats []rawStat
@@ -76,7 +76,6 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		Raw(`
 			SELECT
 				t.TABLE_NAME,
-				IFNULL(t.TABLE_ROWS, 0)           AS TABLE_ROWS,
 				IFNULL(t.DATA_LENGTH, 0)          AS DATA_LENGTH,
 				IFNULL(t.INDEX_LENGTH, 0)         AS INDEX_LENGTH,
 				IFNULL(t.DATA_FREE, 0)            AS DATA_FREE,
@@ -101,7 +100,17 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 					FROM information_schema.statistics s
 					WHERE s.table_schema = t.table_schema
 					  AND s.table_name   = t.table_name
-				) AS INDEX_COUNT
+				) AS INDEX_COUNT,
+				(
+					SELECT IFNULL(
+						GROUP_CONCAT(k.COLUMN_NAME ORDER BY k.ORDINAL_POSITION SEPARATOR ','),
+						''
+					)
+					FROM information_schema.key_column_usage k
+					WHERE k.table_schema    = t.table_schema
+					  AND k.table_name      = t.table_name
+					  AND k.constraint_name = 'PRIMARY'
+				) AS PRIMARY_KEY
 			FROM information_schema.tables t
 			WHERE t.table_schema = ?
 		`, dbName).
@@ -114,12 +123,21 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Build the final slice of TableStats
+	// 3. For each rawStat, run a SELECT COUNT(*) to get an exact row count.
 	stats := make([]TableStats, 0, len(rawStats))
 	for _, rs := range rawStats {
+		var exactCount int64
+		// Build a separate COUNT(*) query for this table.
+		// Use fmt.Sprintf safely because table names come from information_schema (trusted by DB user).
+		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`", rs.TableName)
+		if err := c.BC.DB.Raw(countQuery).Scan(&exactCount).Error; err != nil {
+			// If COUNT(*) fails for some reason, we still populate other fields and set count = -1
+			exactCount = -1
+		}
+
 		stats = append(stats, TableStats{
 			TableName:      rs.TableName,
-			RowCount:       rs.TableRows,
+			ExactRowCount:  exactCount,
 			DataSize:       rs.DataLength,
 			IndexSize:      rs.IndexLength,
 			DataFree:       rs.DataFree,
@@ -136,22 +154,11 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 			ColumnCount:    rs.ColumnCount,
 			IndexCount:     rs.IndexCount,
 			TotalSize:      rs.DataLength + rs.IndexLength,
+			PrimaryKey:     rs.PKColumns,
 		})
 	}
 
-	// 4. (Optional) To get an exact COUNT(*) per table instead of the TABLE_ROWS estimate,
-	//    uncomment the following loop. Note: this issues one SELECT COUNT(*) per table,
-	//    which can be slow on large datasets.
-	/*
-		for i := range stats {
-			var exact int64
-			if err := c.BC.DB.Table(stats[i].TableName).Count(&exact).Error; err == nil {
-				stats[i].ExactRowCount = exact
-			}
-		}
-	*/
-
-	// 5. Send the JSON response
+	// 4. Return JSON
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})

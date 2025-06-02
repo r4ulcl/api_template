@@ -26,7 +26,7 @@ import (
 // @Router /login [post]
 // @security ApiKeyAuth
 func SetupRouter(baseController *controllers.Controller, authController *controllers.AuthController,
-	jwtSecret string,
+	jwtSecret string, userGUI string,
 ) *mux.Router {
 	r := mux.NewRouter()
 
@@ -66,7 +66,7 @@ func SetupRouter(baseController *controllers.Controller, authController *control
 		"exampleRelational": &models.ExampleRelational{},
 	}
 
-	setupURLResourceRoutes(all, baseController, root, resources, modelMap)
+	setupURLResourceRoutes(all, baseController, root, resources, modelMap, userGUI)
 
 	// 8) Admin-only endpoints (wrap another subrouter with AdminOnly)
 	adminOnly := all.NewRoute().Subrouter()
@@ -75,7 +75,7 @@ func SetupRouter(baseController *controllers.Controller, authController *control
 	// Admin GET/DELETE
 	rootAdmin := "/"
 	resourcesAdmin := []string{"user", "example1", "example2", "exampleRelational"}
-	setupURLAdminResourceRoutes(adminOnly, baseController, rootAdmin, resourcesAdmin, modelMap)
+	setupURLAdminResourceRoutes(adminOnly, baseController, rootAdmin, resourcesAdmin, modelMap, userGUI)
 
 	// Admin POST/PUT/PATCH
 	setupBodyAdminResourceRoutes(adminOnly, baseController, rootAdmin, resourcesAdmin, modelMap)
@@ -93,7 +93,7 @@ func SetupRouter(baseController *controllers.Controller, authController *control
 // @Router /{resource}/{id} [get]
 // @security ApiKeyAuth
 func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controller,
-	root string, resources []string, modelMap map[string]interface{},
+	root string, resources []string, modelMap map[string]interface{}, userGUI string,
 ) {
 	for _, resource := range resources {
 		res := resource // capture loop variable
@@ -123,9 +123,16 @@ func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controll
 			controller.GetByID(w, r, instancePtr)
 		}).Methods("GET")
 	}
+
+	if userGUI == "true" {
+		// GET /stats
+		statsPath := root + "stats"
+		log.Println("Registering USER GET /stats at:", statsPath)
+		router.HandleFunc(statsPath, controller.GetDBStats).Methods("GET")
+	}
 }
 
-// setupURLAdminResourceRoutes sets up the admin routes for resources like /users, /servers, /employee, /groups, etc.
+// setupURLAdminResourceRoutes sets up the admin routes for resources like /user, /server, /employee, /group, etc.
 // @Summary Setup admin routes
 // @Tags admin
 // @Description Setup routes for administrative resources like users, servers, employees, etc.
@@ -136,7 +143,7 @@ func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controll
 // @security ApiKeyAuth
 // @security ApiKeyAuth.
 func setupURLAdminResourceRoutes(router *mux.Router, controller *controllers.Controller,
-	root string, resources []string, modelMap map[string]interface{},
+	root string, resources []string, modelMap map[string]interface{}, userGUI string,
 ) {
 	for _, resource := range resources {
 		res := resource
@@ -167,10 +174,14 @@ func setupURLAdminResourceRoutes(router *mux.Router, controller *controllers.Con
 		}).Methods("DELETE")
 	}
 
-	// GET /stats
-	statsPath := root + "stats"
-	log.Println("Registering ADMIN GET /stats at:", statsPath)
-	router.HandleFunc(statsPath, controller.GetDBStats).Methods("GET")
+	log.Println("userGUI", userGUI)
+
+	if userGUI != "true" {
+		// GET /stats
+		statsPath := root + "stats"
+		log.Println("Registering ADMIN GET /stats at:", statsPath)
+		router.HandleFunc(statsPath, controller.GetDBStats).Methods("GET")
+	}
 }
 
 // setupBodyAdminResourceRoutes sets up the admin routes for resources like /users, /servers, /employee, /groups, etc.
@@ -186,7 +197,7 @@ func setupURLAdminResourceRoutes(router *mux.Router, controller *controllers.Con
 // @Param defaultRequest body models.DefaultRequest true "JSON request body for POST and PATCH operations"
 // @param example1 body models.Example1 false "Example1 object to create"
 // @param example2 body models.Example2 false "Example2 object to create"
-// @param example2 body models.Example2 false "Example2 object to create".
+// @param ExampleRelational body models.ExampleRelational false "ExampleRelational object to create".
 func setupBodyAdminResourceRoutes(
 	router *mux.Router,
 	controller *controllers.Controller,
