@@ -49,9 +49,11 @@ func ConnectDB(cfg *utils.Config) {
 	for attempts := 1; attempts <= 5; attempts++ {
 		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 			SkipDefaultTransaction: true,
-			NamingStrategy:         schema.NamingStrategy{},
-			Logger:                 logger.Default.LogMode(logger.Silent),
-			NowFunc:                time.Now,
+			NamingStrategy: schema.NamingStrategy{
+				SingularTable: true, // <-- add this line
+			},
+			Logger:  logger.Default.LogMode(logger.Silent),
+			NowFunc: time.Now,
 		})
 		if err == nil {
 			log.Println("Connected to MySQL successfully.")
@@ -214,57 +216,46 @@ func (bc *BaseController) GetRecordsByID(model interface{}, id string) error {
 // Returns:
 // - An error if the record is not found or update fails.
 func (bc *BaseController) UpdateRecords(model interface{}, id string) error {
-	var primaryKeys []string
+	// 1) Figure out primaryKeys[] and keyValues[] exactly as you did.
 
+	var primaryKeys []string
 	var keyValues []string
 
 	if id != "" {
-		// When ID is provided, split it and use it
 		parts := strings.Split(id, "-")
 		primaryKeys = getJSONPrimaryKeys(model)
-
 		if len(primaryKeys) != len(parts) {
-			ErrMismatch := errors.New("mismatch between number of primary keys and ID parts")
-
-			return fmt.Errorf("%w", ErrMismatch)
+			return fmt.Errorf("mismatch between number of primary keys and ID parts")
 		}
-
 		keyValues = parts
 	} else {
-		// When ID is empty, extract primary key values from the model
+		// extract PKs from model itself
 		var err error
-
 		keyValues, err = getPrimaryKeyValues(model)
 		if err != nil {
-			ErrMismatch := errors.New("failed to get primary key values from model")
-
-			return fmt.Errorf("%w", ErrMismatch)
+			return fmt.Errorf("failed to get primary key values from model: %w", err)
 		}
-
 		primaryKeys = getJSONPrimaryKeys(model)
-
 		if len(primaryKeys) == 0 {
 			return errors.New("no primary keys found in the model")
 		}
 	}
 
-	// Construct the query based on primary keys and their values
-	query := bc.DB.Model(model)
+	// 2) Build the query to target just that record
+	tx := bc.DB.Model(model)
 	for i, pk := range primaryKeys {
-		query = query.Where(pk+" = ?", keyValues[i])
+		tx = tx.Where(pk+" = ?", keyValues[i])
 	}
 
-	// Attempt to find the existing record
-	if err := query.First(model).Error; err != nil {
+	// 3) Call Updates(model) *directly* (GORM will only set the non-zero fields)
+	if err := tx.Updates(model).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("record not found")
 		}
-
 		return err
 	}
 
-	// Save the updated model
-	return bc.DB.Save(model).Error
+	return nil
 }
 
 // DeleteRecords deletes a record identified by its primary key(s).
