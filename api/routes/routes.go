@@ -24,6 +24,8 @@ import (
 // @Failure 400 {string} string "Invalid input"
 // @Failure 401 {Object} models.ErrorResponse "Unauthorized"
 // @Router /login [post]
+// @Router /login [get]
+// @Router /login [put]
 // @security ApiKeyAuth
 func SetupRouter(baseController *controllers.Controller, authController *controllers.AuthController,
 	jwtSecret string, userGUI string,
@@ -48,7 +50,7 @@ func SetupRouter(baseController *controllers.Controller, authController *control
 	r.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)
 
 	// 5) Unprotected auth endpoints
-	r.HandleFunc("/login", authController.Login).Methods("POST", "PUT", "GET")
+	r.HandleFunc("/login", authController.Login).Methods("POST")
 
 	// 6) “all” is the subrouter for any endpoint that *requires* a valid JWT
 	all := r.NewRoute().Subrouter()
@@ -66,7 +68,7 @@ func SetupRouter(baseController *controllers.Controller, authController *control
 		"exampleRelational": &models.ExampleRelational{},
 	}
 
-	setupURLResourceRoutes(all, baseController, root, resources, modelMap, userGUI)
+	setupURLResourceRoutes(all, baseController, authController, root, resources, modelMap, userGUI)
 
 	// 8) Admin-only endpoints (wrap another subrouter with AdminOnly)
 	adminOnly := all.NewRoute().Subrouter()
@@ -92,7 +94,7 @@ func SetupRouter(baseController *controllers.Controller, authController *control
 // @Router /{resource} [get]
 // @Router /{resource}/{id} [get]
 // @security ApiKeyAuth
-func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controller,
+func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controller, authController *controllers.AuthController,
 	root string, resources []string, modelMap map[string]interface{}, userGUI string,
 ) {
 	for _, resource := range resources {
@@ -130,6 +132,9 @@ func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controll
 		log.Println("Registering USER GET /stats at:", statsPath)
 		router.HandleFunc(statsPath, controller.GetDBStats).Methods("GET")
 	}
+
+	//Get user info
+	router.HandleFunc("/login", authController.Login).Methods("PUT", "GET")
 }
 
 // setupURLAdminResourceRoutes sets up the admin routes for resources like /user, /server, /employee, /group, etc.

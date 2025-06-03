@@ -7,10 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
-	"github.com/golang-jwt/jwt"
-
+	"github.com/r4ulcl/api_template/api/middlewares"
 	"github.com/r4ulcl/api_template/database"
 	"github.com/r4ulcl/api_template/utils"
 	"github.com/r4ulcl/api_template/utils/models"
@@ -156,50 +154,17 @@ func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
 }
 
-// handleGetUserInfo processes GET /login: validates the JWT and returns user info.
 func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Request) {
-	// Expect Authorization: Bearer <token>
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Missing Authorization header"})
-		return
-	}
-
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid Authorization header format"})
-		return
-	}
-	tokenString := parts[1]
-
-	// Parse and validate token
-	claims := jwt.MapClaims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		return []byte(ac.Secret), nil
-	})
-	if err != nil || !token.Valid {
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid or expired token"})
-		return
-	}
-
-	// Extract username from claims
-	usernameInterface, ok := claims["username"]
-	if !ok {
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Token missing username claim"})
-		return
-	}
-	username, ok := usernameInterface.(string)
+	// Retrieve user ID from context (set by AuthMiddleware)
+	userIDVal := r.Context().Value(middlewares.ContextUserID)
+	username, ok := userIDVal.(string)
 	if !ok || username == "" {
 		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid username claim"})
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Unauthorized: no user in context"})
 		return
 	}
 
-	// Fetch user record
+	// Fetch user record by username (userID)
 	var user models.User
 	if err := ac.BC.GetRecordsByID(&user, username); err != nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -213,69 +178,24 @@ func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(user)
 }
-
-// handleRenewToken processes PUT /login: validates the JWT and issues a new one.
 func (ac *AuthController) handleRenewToken(w http.ResponseWriter, r *http.Request) {
-	// Expect Authorization: Bearer <token>
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Missing Authorization header"})
-		return
-	}
+	// Retrieve username and role from context (set by AuthMiddleware)
+	userIDVal := r.Context().Value(middlewares.ContextUserID)
+	roleVal := r.Context().Value(middlewares.ContextRole)
 
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+	username, ok1 := userIDVal.(string)
+	role, ok2 := roleVal.(string)
+	if !ok1 || username == "" || !ok2 || role == "" {
 		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid Authorization header format"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized: missing user or role in context"})
 		return
-	}
-	oldTokenString := parts[1]
-
-	// Parse and validate old token
-	claims := jwt.MapClaims{}
-	token, err := jwt.ParseWithClaims(oldTokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		return []byte(ac.Secret), nil
-	})
-	if err != nil || !token.Valid {
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid or expired token"})
-		return
-	}
-
-	// Extract claims
-	usernameInterface, userOK := claims["username"]
-	roleInterface, roleOK := claims["role"]
-	if !userOK || !roleOK {
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Token missing required claims"})
-		return
-	}
-	username, ok1 := usernameInterface.(string)
-	role, ok2 := roleInterface.(string)
-	if !ok1 || !ok2 || username == "" || role == "" {
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid claims in token"})
-		return
-	}
-
-	// Optionally: ensure token isn't too old to renew
-	if iatRaw, exists := claims["iat"]; exists {
-		if iatFloat, ok := iatRaw.(float64); ok {
-			issuedAt := time.Unix(int64(iatFloat), 0)
-			if time.Since(issuedAt) > 7*24*time.Hour {
-				w.WriteHeader(http.StatusUnauthorized)
-				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Token too old to renew"})
-				return
-			}
-		}
 	}
 
 	// Generate a new token
 	newTokenString, err := utils.GenerateJWT(username, role, ac.Secret)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Failed to generate new token"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to generate new token"})
 		return
 	}
 
