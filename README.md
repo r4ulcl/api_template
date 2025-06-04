@@ -80,6 +80,7 @@ docker-compose up --build
 
 ## **Project Structure** 📂
 
+```
 api_template/
 ├── api/                        # Contains all API-related logic
 │   ├── controllers/            # Request handlers for API endpoints (business logic)
@@ -94,13 +95,13 @@ api_template/
 ├── docker-compose.yml          # Docker Compose config for multi-service setups
 ├── go.mod                      # Go module dependencies and module path
 └── go.sum                      # Dependency checksums for reproducible builds
-
+```
 
 ---
 
 ## **Environment Variables** ⚙️
 
-The application requires some **environment variables** to be set. These are defined in `docker-compose.yml`.
+The application requires some **environment variables** to be set. These are defined in `.env`.
 
 | Variable      | Description                  | Default Value |
 |--------------|-------------------------------|--------------|
@@ -112,7 +113,7 @@ The application requires some **environment variables** to be set. These are def
 | `JWT_SECRET` | JWT Secret Key for Tokens     | `your_jwt_secret_key` |
 | `ADMIN_PASSWORD` | Default Admin Password    | `SuperSecurePassword` |
 
-> **⚠️ Important**: Modify these values in `docker-compose.yml` or set them manually before running the app.
+> **⚠️ Important**: Modify these values in `.env` or set them manually before running the app.
 
 ---
 
@@ -128,14 +129,7 @@ This provides a detailed overview of all endpoints, parameters, and responses.
 
 ## **Usage** 🚀
 
-### **1. Register a New User**
-```sh
-curl -X POST "http://localhost:8080/register" \
-     -H "Content-Type: application/json" \
-     -d '{"username": "testuser", "password": "password123", "role": "user"}'
-```
-
-### **2. Login to Get JWT Token**
+### **1. Login to Get JWT Token**
 ```sh
 curl -X POST "http://localhost:8080/login" \
      -H "Content-Type: application/json" \
@@ -148,13 +142,23 @@ _Response:_
 }
 ```
 
-### **3. Access Protected Routes**
+### **2. Access Protected Routes**
 Include the JWT token in the `Authorization` header:
 ```sh
 curl -X GET "http://localhost:8080/xxxxxxx" \
      -H "Authorization: Bearer your.jwt.token"
 ```
 
+---
+
+## **TODO**
+
+- [ ] User manage section, get info, change password, etc. Rol user too
+- [ ] Bool in .env to swagger
+- [ ] Paginate API
+
+
+---
 
 ## **License** 📜
 
