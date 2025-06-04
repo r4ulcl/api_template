@@ -13,50 +13,30 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
-// SetupRouter sets up Gorilla Mux with our handlers and Swagger
-// @Summary Login and generate JWT token
-// @Description Login using username and password, and return a JWT token for authorized access
-// @Tags authentication
-// @Accept json
-// @Produce json
-// @Param body body models.LoginRequest true "Login request with username and password"
-// @Success 200 {object} models.JWTResponse
-// @Failure 400 {string} string "Invalid input"
-// @Failure 401 {Object} models.ErrorResponse "Unauthorized"
-// @Router /login [post]
-// @Router /login [get]
-// @Router /login [put]
-// @security ApiKeyAuth
-func SetupRouter(baseController *controllers.Controller, authController *controllers.AuthController,
-	jwtSecret string, userGUI string,
+// SetupRouter sets up Gorilla Mux with our handlers and Swagger UI.
+// (No Swagger annotations here—each endpoint is documented in its own setup function.)
+func SetupRouter(
+	baseController *controllers.Controller,
+	authController *controllers.AuthController,
+	jwtSecret string,
+	userGUI string,
 ) *mux.Router {
 	r := mux.NewRouter()
 
-	// 2) Before registering any routes, tell the router to handle OPTIONS for us:
-	//    whenever you register GET/POST/PUT/DELETE/etc. on a path, CORSMethodMiddleware
-	//    will generate a matching OPTIONS + “Allow:” header automatically.
+	// 1) CORS preflight middleware makes OPTIONS responses automatic for all registered routes.
 	r.Use(mux.CORSMethodMiddleware(r))
 
-	// 3) (Optional) If you want a single catch-all OPTIONS for anything not covered:
-	//    The middleware above is typically enough. But if you still see a 405 on
-	//    some nested subrouter, uncomment the following two lines and place them *after*
-	//    you’ve registered Swagger and /login but *before* you create subrouters.
-	//
-	// r.PathPrefix("/").Methods("OPTIONS").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	//     w.WriteHeader(http.StatusOK)
-	// })
-
-	// 4) Swagger UI (no JWT required)
+	// 2) Swagger UI (no authentication required)
 	r.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)
 
-	// 5) Unprotected auth endpoints
-	r.HandleFunc("/login", authController.Login).Methods("POST")
+	// 3) Unprotected auth endpoints (handled by AuthController.Login for POST/GET/PUT)
+	r.HandleFunc("/login", authController.Login).Methods("POST", "GET", "PUT")
 
-	// 6) “all” is the subrouter for any endpoint that *requires* a valid JWT
+	// 4) “all” subrouter requires a valid JWT
 	all := r.NewRoute().Subrouter()
 	all.Use(middlewares.AuthMiddleware(jwtSecret))
 
-	// 7) Non-admin resources (GET list, GET by id)
+	// 5) Non-admin resources (GET list with pagination/filters, GET by ID)
 	root := "/"
 	resources := []string{"example1", "example2", "exampleRelational"}
 
@@ -70,7 +50,7 @@ func SetupRouter(baseController *controllers.Controller, authController *control
 
 	setupURLResourceRoutes(all, baseController, authController, root, resources, modelMap, userGUI)
 
-	// 8) Admin-only endpoints (wrap another subrouter with AdminOnly)
+	// 6) Admin-only endpoints (wrap another subrouter with AdminOnly)
 	adminOnly := all.NewRoute().Subrouter()
 	adminOnly.Use(middlewares.AdminOnly)
 
@@ -85,17 +65,30 @@ func SetupRouter(baseController *controllers.Controller, authController *control
 	return r
 }
 
-// setupURLResourceRoutes sets up the common routes for CRUD operations for resources
-// @Summary Setup GET resource routes
-// @Tags user
-// @Description Setup routes for CRUD operations on resources like users, servers, employees, etc.
-// @Param resource path string true "Resource type" Enums(example1, example2, exampleRelational)
-// @Param id path string false "Resource ID (for operations on specific resources)"
-// @Router /{resource} [get]
-// @Router /{resource}/{id} [get]
-// @security ApiKeyAuth
-func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controller, authController *controllers.AuthController,
-	root string, resources []string, modelMap map[string]interface{}, userGUI string,
+// setupURLResourceRoutes sets up the common GET routes (list + by-ID) for resources.
+// @Summary    Retrieve resources (paginated & filterable) or a single resource by ID
+// @Tags       resources
+// @Description Returns a paginated list of items for the given resource, applying any query-string filters (e.g., ?status=active&category=books). To fetch a single item, include “/{id}”.
+// @Param      resource   path     string  true   "Resource type"                                   Enums(example1, example2, exampleRelational)
+// @Param      id         path     string  false  "Resource ID (when fetching a single item)"
+// @Param      page       query    int     false  "Page number (default: 1)"                         default(1)
+// @Param      per_page   query    int     false  "Number of items per page (default: 10)"           default(10)
+// @Param      *          query    string  false  "Any other key=value acts as a filter (e.g., ?status=active). Multiple filters allowed."
+// @Produce    json
+// @Success    200  {object}  map[string]interface{}  "Returns { data: [...], meta: {...}, links: {...} }"
+// @Failure    400  {object}  models.ErrorResponse   "Invalid request"
+// @Failure    500  {object}  models.ErrorResponse   "Internal server error"
+// @Router     /{resource}       [get]
+// @Router     /{resource}/{id}  [get]
+// @Security   ApiKeyAuth
+func setupURLResourceRoutes(
+	router *mux.Router,
+	controller *controllers.Controller,
+	authController *controllers.AuthController,
+	root string,
+	resources []string,
+	modelMap map[string]interface{},
+	userGUI string,
 ) {
 	for _, resource := range resources {
 		res := resource // capture loop variable
@@ -104,13 +97,13 @@ func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controll
 
 		log.Println("Registering GET routes for resource:", resourcePath)
 
-		// LIST
+		// LIST with pagination & filters
 		router.HandleFunc(resourcePath, func(w http.ResponseWriter, r *http.Request) {
 			if modelType == nil {
 				http.Error(w, "Invalid resource", http.StatusBadRequest)
 				return
 			}
-			// create a slice pointer of the correct type (e.g. *[]Example1)
+			// Create a slice pointer of the correct type (e.g., *[]Example1)
 			slicePtr := reflect.New(reflect.SliceOf(reflect.TypeOf(modelType).Elem())).Interface()
 			controller.GetAll(w, r, slicePtr)
 		}).Methods("GET")
@@ -127,35 +120,44 @@ func setupURLResourceRoutes(router *mux.Router, controller *controllers.Controll
 	}
 
 	if userGUI == "true" {
-		// GET /stats
+		// GET /stats (only when GUI is enabled)
 		statsPath := root + "stats"
 		log.Println("Registering USER GET /stats at:", statsPath)
 		router.HandleFunc(statsPath, controller.GetDBStats).Methods("GET")
 	}
 
-	//Get user info
+	// Allow login via PUT/GET (duplicated for GUI)
 	router.HandleFunc("/login", authController.Login).Methods("PUT", "GET")
 }
 
-// setupURLAdminResourceRoutes sets up the admin routes for resources like /user, /server, /employee, /group, etc.
-// @Summary Setup admin routes
-// @Tags admin
-// @Description Setup routes for administrative resources like users, servers, employees, etc.
-// @Param resource path string true "Resource type" Enums(user, example1, example2, exampleRelational)
-// @Param id path string false "Resource ID (for operations on specific resources)"
-// @Router /user [get]                     // GET route: No body parameter
-// @Router /{resource}/{id} [delete]       // DELETE route: No body parameter
-// @security ApiKeyAuth
-// @security ApiKeyAuth.
-func setupURLAdminResourceRoutes(router *mux.Router, controller *controllers.Controller,
-	root string, resources []string, modelMap map[string]interface{}, userGUI string,
+// setupURLAdminResourceRoutes sets up the admin GET (list for users) and DELETE routes.
+// @Summary    Admin: list users or delete a resource by ID
+// @Tags       admin
+// @Description If “resource=user”, GET /user returns all users (paginated & filterable). DELETE /{resource}/{id} deletes the specified item.
+// @Param      resource   path     string  true   "Resource type"                                   Enums(user, example1, example2, exampleRelational)
+// @Param      id         path     string  false  "Resource ID (for delete operations)"
+// @Produce    json
+// @Success    200  {object}  interface{}       "For GET /user: array of users; for DELETE: { message: \"Deleted successfully\" }"
+// @Failure    400  {object}  models.ErrorResponse  "Invalid resource"
+// @Failure    403  {object}  models.ErrorResponse  "Forbidden: Admins only"
+// @Failure    500  {object}  models.ErrorResponse  "Internal server error"
+// @Router     /{resource}       [get]     // only applies if resource=user
+// @Router     /{resource}/{id}  [delete]
+// @Security   ApiKeyAuth
+func setupURLAdminResourceRoutes(
+	router *mux.Router,
+	controller *controllers.Controller,
+	root string,
+	resources []string,
+	modelMap map[string]interface{},
+	userGUI string,
 ) {
 	for _, resource := range resources {
 		res := resource
 		modelType := modelMap[res]
 		resourcePath := root + res
 
-		// If this is “user”, also allow GET /user to list all users
+		// If this is “user”, also allow GET /user (list all users)
 		if res == "user" {
 			log.Println("Registering ADMIN GET /user")
 			router.HandleFunc(resourcePath, func(w http.ResponseWriter, r *http.Request) {
@@ -182,27 +184,33 @@ func setupURLAdminResourceRoutes(router *mux.Router, controller *controllers.Con
 	log.Println("userGUI", userGUI)
 
 	if userGUI != "true" {
-		// GET /stats
+		// GET /stats (only if GUI is disabled)
 		statsPath := root + "stats"
 		log.Println("Registering ADMIN GET /stats at:", statsPath)
 		router.HandleFunc(statsPath, controller.GetDBStats).Methods("GET")
 	}
 }
 
-// setupBodyAdminResourceRoutes sets up the admin routes for resources like /users, /servers, /employee, /groups, etc.
-// @Summary Setup admin routes
-// @Tags admin
-// @Description Setup routes for administrative resources like users, servers, employees, etc.
-// @Param resource path string true "Resource type" Enums(user, example1, example2, exampleRelational)
-// @Param id path string false "Resource ID (for operations on specific resources)"
-// @security ApiKeyAuth
-// @Router /{resource} [post]
-// @Router /{resource} [put]
-// @Router /{resource}/{id} [patch]
-// @Param defaultRequest body models.DefaultRequest true "JSON request body for POST and PATCH operations"
-// @param example1 body models.Example1 false "Example1 object to create"
-// @param example2 body models.Example2 false "Example2 object to create"
-// @param ExampleRelational body models.ExampleRelational false "ExampleRelational object to create".
+// setupBodyAdminResourceRoutes sets up the admin POST, PUT, and PATCH routes.
+// @Summary    Admin: create/overwrite or update a resource
+// @Tags       admin
+// @Description Allows admin to create (POST), overwrite (PUT), or update (PATCH) any resource.
+// @Param      resource          path     string                  true   "Resource type"                           Enums(user, example1, example2, exampleRelational)
+// @Param      id                path     string                  false  "Resource ID (for PATCH)"
+// @Param      defaultRequest    body     models.DefaultRequest   true   "Generic request body for POST/PATCH"
+// @Param      example1          body     models.Example1         false  "Example1 object to create/overwrite"
+// @Param      example2          body     models.Example2         false  "Example2 object to create/overwrite"
+// @Param      ExampleRelational body     models.ExampleRelational false "ExampleRelational to create/overwrite"
+// @Accept     json
+// @Produce    json
+// @Success    201  {object}  interface{}             "Returns the created/updated object"
+// @Failure    400  {object}  models.ErrorResponse    "Invalid input JSON"
+// @Failure    403  {object}  models.ErrorResponse    "Forbidden: Admins only"
+// @Failure    500  {object}  models.ErrorResponse    "Internal server error"
+// @Router     /{resource}       [post]
+// @Router     /{resource}       [put]
+// @Router     /{resource}/{id}  [patch]
+// @Security   ApiKeyAuth
 func setupBodyAdminResourceRoutes(
 	router *mux.Router,
 	controller *controllers.Controller,

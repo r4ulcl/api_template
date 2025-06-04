@@ -32,6 +32,28 @@ type TableStats struct {
 	PrimaryKey     string     `json:"primary_key"`           // comma-separated list of PK column(s)
 }
 
+// paginatedStatsResponse wraps the stats slice in the new JSON format.
+type paginatedStatsResponse struct {
+	Data  []TableStats    `json:"data"`
+	Meta  statsPagination `json:"meta"`
+	Links statsLinks      `json:"links"`
+}
+
+type statsPagination struct {
+	CurrentPage int `json:"current_page"`
+	PerPage     int `json:"per_page"`
+	TotalItems  int `json:"total_items"`
+	TotalPages  int `json:"total_pages"`
+}
+
+type statsLinks struct {
+	Self  string `json:"self"`
+	First string `json:"first"`
+	Prev  string `json:"prev,omitempty"`
+	Next  string `json:"next,omitempty"`
+	Last  string `json:"last"`
+}
+
 // GetDBStats retrieves, for each table in the current schema:
 //   - exact row count (via SELECT COUNT(*))
 //   - DATA_LENGTH, INDEX_LENGTH, DATA_FREE, MAX_DATA_LENGTH, AUTO_INCREMENT
@@ -42,15 +64,15 @@ type TableStats struct {
 //   - primary_key (all PK columns comma‐separated)
 //   - total_size_bytes (data + index size)
 //
-// Returns a JSON array of TableStats. On any error, it responds with HTTP 500 + ErrorResponse.
+// Returns a paginated JSON response with “data”, “meta”, and “links”. On any error,
+// it responds with HTTP 500 + ErrorResponse.
 func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// 1. Determine the current database/schema
 	dbName := c.BC.DB.Migrator().CurrentDatabase()
 
-	// 2. Query information_schema.tables for everything except TABLE_ROWS
-	//    (we will do COUNT(*) below for each table to get the real-time row count).
+	// 2. Query information_schema.tables for metrics (excluding TABLE_ROWS itself)
 	type rawStat struct {
 		TableName      string     `gorm:"column:TABLE_NAME"`
 		DataLength     uint64     `gorm:"column:DATA_LENGTH"`
@@ -127,11 +149,8 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 	stats := make([]TableStats, 0, len(rawStats))
 	for _, rs := range rawStats {
 		var exactCount int64
-		// Build a separate COUNT(*) query for this table.
-		// Use fmt.Sprintf safely because table names come from information_schema (trusted by DB user).
 		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`", rs.TableName)
 		if err := c.BC.DB.Raw(countQuery).Scan(&exactCount).Error; err != nil {
-			// If COUNT(*) fails for some reason, we still populate other fields and set count = -1
 			exactCount = -1
 		}
 
@@ -158,10 +177,40 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// 4. Return JSON
-	if err := json.NewEncoder(w).Encode(stats); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
-		return
+	// 4. Build pagination metadata and links (single page only)
+	totalItems := len(stats)
+	currentPage := 1
+	perPage := totalItems
+	totalPages := 1
+
+	// Reconstruct the request’s base path + query (to fill “self”)
+	basePath := r.URL.Path
+	q := r.URL.Query()
+	q.Set("page", fmt.Sprintf("%d", currentPage))
+	q.Set("per_page", fmt.Sprintf("%d", perPage))
+	selfURL := basePath + "?" + q.Encode()
+
+	// First and Last are the same since only one page exists
+	firstURL := selfURL
+	lastURL := selfURL
+
+	// No Prev/Next if only one page
+	resp := paginatedStatsResponse{
+		Data: stats,
+		Meta: statsPagination{
+			CurrentPage: currentPage,
+			PerPage:     perPage,
+			TotalItems:  totalItems,
+			TotalPages:  totalPages,
+		},
+		Links: statsLinks{
+			Self:  selfURL,
+			First: firstURL,
+			Last:  lastURL,
+		},
 	}
+
+	// 5. Return JSON
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }

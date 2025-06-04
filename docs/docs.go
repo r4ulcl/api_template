@@ -24,75 +24,6 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/login": {
-            "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "Login using username and password, and return a JWT token for authorized access",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "authentication"
-                ],
-                "summary": "Login and generate JWT token",
-                "parameters": [
-                    {
-                        "description": "Login request with username and password",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.LoginRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.JWTResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid input",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "type": "Object"
-                        }
-                    }
-                }
-            }
-        },
-        "/user": {
-            "get": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    },
-                    {
-                        "ApiKeyAuth.": []
-                    }
-                ],
-                "description": "Setup routes for administrative resources like users, servers, employees, etc.",
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Setup admin routes",
-                "responses": {}
-            }
-        },
         "/{resource}": {
             "get": {
                 "security": [
@@ -100,14 +31,18 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Setup routes for CRUD operations on resources like users, servers, employees, etc.",
-                "tags": [
-                    "user"
+                "description": "If “resource=user”, GET /user returns all users (paginated \u0026 filterable). DELETE /{resource}/{id} deletes the specified item.",
+                "produces": [
+                    "application/json"
                 ],
-                "summary": "Setup GET resource routes",
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Admin: list users or delete a resource by ID",
                 "parameters": [
                     {
                         "enum": [
+                            "user",
                             "example1",
                             "example2",
                             "exampleRelational"
@@ -119,7 +54,30 @@ const docTemplate = `{
                         "required": true
                     }
                 ],
-                "responses": {}
+                "responses": {
+                    "200": {
+                        "description": "For GET /user: array of users; for DELETE: { message: \\\"Deleted successfully\\\" }",
+                        "schema": {}
+                    },
+                    "400": {
+                        "description": "Invalid resource",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: Admins only",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
             },
             "put": {
                 "security": [
@@ -127,11 +85,17 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Setup routes for administrative resources like users, servers, employees, etc.",
+                "description": "Allows admin to create (POST), overwrite (PUT), or update (PATCH) any resource.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "Setup admin routes",
+                "summary": "Admin: create/overwrite or update a resource",
                 "parameters": [
                     {
                         "enum": [
@@ -147,7 +111,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "JSON request body for POST and PATCH operations",
+                        "description": "Generic request body for POST/PATCH",
                         "name": "defaultRequest",
                         "in": "body",
                         "required": true,
@@ -156,7 +120,7 @@ const docTemplate = `{
                         }
                     },
                     {
-                        "description": "Example1 object to create",
+                        "description": "Example1 object to create/overwrite",
                         "name": "example1",
                         "in": "body",
                         "schema": {
@@ -164,7 +128,7 @@ const docTemplate = `{
                         }
                     },
                     {
-                        "description": "Example2 object to create",
+                        "description": "Example2 object to create/overwrite",
                         "name": "example2",
                         "in": "body",
                         "schema": {
@@ -172,7 +136,7 @@ const docTemplate = `{
                         }
                     },
                     {
-                        "description": "ExampleRelational object to create",
+                        "description": "ExampleRelational to create/overwrite",
                         "name": "ExampleRelational",
                         "in": "body",
                         "schema": {
@@ -180,7 +144,30 @@ const docTemplate = `{
                         }
                     }
                 ],
-                "responses": {}
+                "responses": {
+                    "201": {
+                        "description": "Returns the created/updated object",
+                        "schema": {}
+                    },
+                    "400": {
+                        "description": "Invalid input JSON",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: Admins only",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
             },
             "post": {
                 "security": [
@@ -188,11 +175,17 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Setup routes for administrative resources like users, servers, employees, etc.",
+                "description": "Allows admin to create (POST), overwrite (PUT), or update (PATCH) any resource.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "Setup admin routes",
+                "summary": "Admin: create/overwrite or update a resource",
                 "parameters": [
                     {
                         "enum": [
@@ -208,7 +201,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "JSON request body for POST and PATCH operations",
+                        "description": "Generic request body for POST/PATCH",
                         "name": "defaultRequest",
                         "in": "body",
                         "required": true,
@@ -217,7 +210,7 @@ const docTemplate = `{
                         }
                     },
                     {
-                        "description": "Example1 object to create",
+                        "description": "Example1 object to create/overwrite",
                         "name": "example1",
                         "in": "body",
                         "schema": {
@@ -225,7 +218,7 @@ const docTemplate = `{
                         }
                     },
                     {
-                        "description": "Example2 object to create",
+                        "description": "Example2 object to create/overwrite",
                         "name": "example2",
                         "in": "body",
                         "schema": {
@@ -233,7 +226,7 @@ const docTemplate = `{
                         }
                     },
                     {
-                        "description": "ExampleRelational object to create",
+                        "description": "ExampleRelational to create/overwrite",
                         "name": "ExampleRelational",
                         "in": "body",
                         "schema": {
@@ -241,7 +234,30 @@ const docTemplate = `{
                         }
                     }
                 ],
-                "responses": {}
+                "responses": {
+                    "201": {
+                        "description": "Returns the created/updated object",
+                        "schema": {}
+                    },
+                    "400": {
+                        "description": "Invalid input JSON",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: Admins only",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
             }
         },
         "/{resource}/{id}": {
@@ -251,11 +267,14 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Setup routes for CRUD operations on resources like users, servers, employees, etc.",
-                "tags": [
-                    "user"
+                "description": "Returns a paginated list of items for the given resource, applying any query-string filters (e.g., ?status=active\u0026category=books). To fetch a single item, include “/{id}”.",
+                "produces": [
+                    "application/json"
                 ],
-                "summary": "Setup GET resource routes",
+                "tags": [
+                    "resources"
+                ],
+                "summary": "Retrieve resources (paginated \u0026 filterable) or a single resource by ID",
                 "parameters": [
                     {
                         "enum": [
@@ -271,27 +290,67 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Resource ID (for operations on specific resources)",
+                        "description": "Resource ID (when fetching a single item)",
                         "name": "id",
                         "in": "path"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number (default: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Number of items per page (default: 10)",
+                        "name": "per_page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Any other key=value acts as a filter (e.g., ?status=active). Multiple filters allowed.",
+                        "name": "*",
+                        "in": "query"
                     }
                 ],
-                "responses": {}
+                "responses": {
+                    "200": {
+                        "description": "Returns { data: [...], meta: {...}, links: {...} }",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
             },
             "delete": {
                 "security": [
                     {
                         "ApiKeyAuth": []
-                    },
-                    {
-                        "ApiKeyAuth.": []
                     }
                 ],
-                "description": "Setup routes for administrative resources like users, servers, employees, etc.",
+                "description": "If “resource=user”, GET /user returns all users (paginated \u0026 filterable). DELETE /{resource}/{id} deletes the specified item.",
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "Setup admin routes",
+                "summary": "Admin: list users or delete a resource by ID",
                 "parameters": [
                     {
                         "enum": [
@@ -308,12 +367,35 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Resource ID (for operations on specific resources)",
+                        "description": "Resource ID (for delete operations)",
                         "name": "id",
                         "in": "path"
                     }
                 ],
-                "responses": {}
+                "responses": {
+                    "200": {
+                        "description": "For GET /user: array of users; for DELETE: { message: \\\"Deleted successfully\\\" }",
+                        "schema": {}
+                    },
+                    "400": {
+                        "description": "Invalid resource",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: Admins only",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
             },
             "patch": {
                 "security": [
@@ -321,11 +403,17 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Setup routes for administrative resources like users, servers, employees, etc.",
+                "description": "Allows admin to create (POST), overwrite (PUT), or update (PATCH) any resource.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "Setup admin routes",
+                "summary": "Admin: create/overwrite or update a resource",
                 "parameters": [
                     {
                         "enum": [
@@ -342,12 +430,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Resource ID (for operations on specific resources)",
+                        "description": "Resource ID (for PATCH)",
                         "name": "id",
                         "in": "path"
                     },
                     {
-                        "description": "JSON request body for POST and PATCH operations",
+                        "description": "Generic request body for POST/PATCH",
                         "name": "defaultRequest",
                         "in": "body",
                         "required": true,
@@ -356,7 +444,7 @@ const docTemplate = `{
                         }
                     },
                     {
-                        "description": "Example1 object to create",
+                        "description": "Example1 object to create/overwrite",
                         "name": "example1",
                         "in": "body",
                         "schema": {
@@ -364,7 +452,7 @@ const docTemplate = `{
                         }
                     },
                     {
-                        "description": "Example2 object to create",
+                        "description": "Example2 object to create/overwrite",
                         "name": "example2",
                         "in": "body",
                         "schema": {
@@ -372,7 +460,7 @@ const docTemplate = `{
                         }
                     },
                     {
-                        "description": "ExampleRelational object to create",
+                        "description": "ExampleRelational to create/overwrite",
                         "name": "ExampleRelational",
                         "in": "body",
                         "schema": {
@@ -380,7 +468,30 @@ const docTemplate = `{
                         }
                     }
                 ],
-                "responses": {}
+                "responses": {
+                    "201": {
+                        "description": "Returns the created/updated object",
+                        "schema": {}
+                    },
+                    "400": {
+                        "description": "Invalid input JSON",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: Admins only",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
             }
         }
     },
@@ -390,6 +501,15 @@ const docTemplate = `{
             "properties": {
                 "field": {
                     "description": "Field is a placeholder for data that might be required in some requests.",
+                    "type": "string"
+                }
+            }
+        },
+        "models.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "description": "Error contains a descriptive error message.",
                     "type": "string"
                 }
             }
@@ -447,32 +567,6 @@ const docTemplate = `{
                 },
                 "field3": {
                     "description": "Field3 stores additional relationship-related information.",
-                    "type": "string"
-                }
-            }
-        },
-        "models.JWTResponse": {
-            "type": "object",
-            "properties": {
-                "token": {
-                    "description": "Token is the JWT token assigned to the authenticated user.",
-                    "type": "string"
-                }
-            }
-        },
-        "models.LoginRequest": {
-            "type": "object",
-            "required": [
-                "password",
-                "username"
-            ],
-            "properties": {
-                "password": {
-                    "description": "Password is the user's password used for authentication.",
-                    "type": "string"
-                },
-                "username": {
-                    "description": "Username is the unique identifier for the user attempting to log in.",
                     "type": "string"
                 }
             }

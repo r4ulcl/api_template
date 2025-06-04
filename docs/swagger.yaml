@@ -7,6 +7,12 @@ definitions:
           requests.
         type: string
     type: object
+  models.ErrorResponse:
+    properties:
+      error:
+        description: Error contains a descriptive error message.
+        type: string
+    type: object
   models.Example1:
     properties:
       field1:
@@ -47,25 +53,6 @@ definitions:
         description: Field3 stores additional relationship-related information.
         type: string
     type: object
-  models.JWTResponse:
-    properties:
-      token:
-        description: Token is the JWT token assigned to the authenticated user.
-        type: string
-    type: object
-  models.LoginRequest:
-    properties:
-      password:
-        description: Password is the user's password used for authentication.
-        type: string
-      username:
-        description: Username is the unique identifier for the user attempting to
-          log in.
-        type: string
-    required:
-    - password
-    - username
-    type: object
 info:
   contact:
     email: support@yourdomain.com
@@ -82,27 +69,8 @@ info:
 paths:
   /{resource}:
     get:
-      description: Setup routes for CRUD operations on resources like users, servers,
-        employees, etc.
-      parameters:
-      - description: Resource type
-        enum:
-        - example1
-        - example2
-        - exampleRelational
-        in: path
-        name: resource
-        required: true
-        type: string
-      responses: {}
-      security:
-      - ApiKeyAuth: []
-      summary: Setup GET resource routes
-      tags:
-      - user
-    post:
-      description: Setup routes for administrative resources like users, servers,
-        employees, etc.
+      description: If “resource=user”, GET /user returns all users (paginated & filterable).
+        DELETE /{resource}/{id} deletes the specified item.
       parameters:
       - description: Resource type
         enum:
@@ -114,210 +82,310 @@ paths:
         name: resource
         required: true
         type: string
-      - description: JSON request body for POST and PATCH operations
-        in: body
-        name: defaultRequest
-        required: true
-        schema:
-          $ref: '#/definitions/models.DefaultRequest'
-      - description: Example1 object to create
-        in: body
-        name: example1
-        schema:
-          $ref: '#/definitions/models.Example1'
-      - description: Example2 object to create
-        in: body
-        name: example2
-        schema:
-          $ref: '#/definitions/models.Example2'
-      - description: ExampleRelational object to create
-        in: body
-        name: ExampleRelational
-        schema:
-          $ref: '#/definitions/models.ExampleRelational'
-      responses: {}
-      security:
-      - ApiKeyAuth: []
-      summary: Setup admin routes
-      tags:
-      - admin
-    put:
-      description: Setup routes for administrative resources like users, servers,
-        employees, etc.
-      parameters:
-      - description: Resource type
-        enum:
-        - user
-        - example1
-        - example2
-        - exampleRelational
-        in: path
-        name: resource
-        required: true
-        type: string
-      - description: JSON request body for POST and PATCH operations
-        in: body
-        name: defaultRequest
-        required: true
-        schema:
-          $ref: '#/definitions/models.DefaultRequest'
-      - description: Example1 object to create
-        in: body
-        name: example1
-        schema:
-          $ref: '#/definitions/models.Example1'
-      - description: Example2 object to create
-        in: body
-        name: example2
-        schema:
-          $ref: '#/definitions/models.Example2'
-      - description: ExampleRelational object to create
-        in: body
-        name: ExampleRelational
-        schema:
-          $ref: '#/definitions/models.ExampleRelational'
-      responses: {}
-      security:
-      - ApiKeyAuth: []
-      summary: Setup admin routes
-      tags:
-      - admin
-  /{resource}/{id}:
-    delete:
-      description: Setup routes for administrative resources like users, servers,
-        employees, etc.
-      parameters:
-      - description: Resource type
-        enum:
-        - user
-        - example1
-        - example2
-        - exampleRelational
-        in: path
-        name: resource
-        required: true
-        type: string
-      - description: Resource ID (for operations on specific resources)
-        in: path
-        name: id
-        type: string
-      responses: {}
-      security:
-      - ApiKeyAuth: []
-      - ApiKeyAuth.: []
-      summary: Setup admin routes
-      tags:
-      - admin
-    get:
-      description: Setup routes for CRUD operations on resources like users, servers,
-        employees, etc.
-      parameters:
-      - description: Resource type
-        enum:
-        - example1
-        - example2
-        - exampleRelational
-        in: path
-        name: resource
-        required: true
-        type: string
-      - description: Resource ID (for operations on specific resources)
-        in: path
-        name: id
-        type: string
-      responses: {}
-      security:
-      - ApiKeyAuth: []
-      summary: Setup GET resource routes
-      tags:
-      - user
-    patch:
-      description: Setup routes for administrative resources like users, servers,
-        employees, etc.
-      parameters:
-      - description: Resource type
-        enum:
-        - user
-        - example1
-        - example2
-        - exampleRelational
-        in: path
-        name: resource
-        required: true
-        type: string
-      - description: Resource ID (for operations on specific resources)
-        in: path
-        name: id
-        type: string
-      - description: JSON request body for POST and PATCH operations
-        in: body
-        name: defaultRequest
-        required: true
-        schema:
-          $ref: '#/definitions/models.DefaultRequest'
-      - description: Example1 object to create
-        in: body
-        name: example1
-        schema:
-          $ref: '#/definitions/models.Example1'
-      - description: Example2 object to create
-        in: body
-        name: example2
-        schema:
-          $ref: '#/definitions/models.Example2'
-      - description: ExampleRelational object to create
-        in: body
-        name: ExampleRelational
-        schema:
-          $ref: '#/definitions/models.ExampleRelational'
-      responses: {}
-      security:
-      - ApiKeyAuth: []
-      summary: Setup admin routes
-      tags:
-      - admin
-  /login:
-    post:
-      consumes:
-      - application/json
-      description: Login using username and password, and return a JWT token for authorized
-        access
-      parameters:
-      - description: Login request with username and password
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/models.LoginRequest'
       produces:
       - application/json
       responses:
         "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/models.JWTResponse'
+          description: 'For GET /user: array of users; for DELETE: { message: \"Deleted
+            successfully\" }'
+          schema: {}
         "400":
-          description: Invalid input
+          description: Invalid resource
           schema:
-            type: string
-        "401":
-          description: Unauthorized
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: 'Forbidden: Admins only'
           schema:
-            type: Object
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
       security:
       - ApiKeyAuth: []
-      summary: Login and generate JWT token
+      summary: 'Admin: list users or delete a resource by ID'
       tags:
-      - authentication
-  /user:
-    get:
-      description: Setup routes for administrative resources like users, servers,
-        employees, etc.
-      responses: {}
+      - admin
+    post:
+      consumes:
+      - application/json
+      description: Allows admin to create (POST), overwrite (PUT), or update (PATCH)
+        any resource.
+      parameters:
+      - description: Resource type
+        enum:
+        - user
+        - example1
+        - example2
+        - exampleRelational
+        in: path
+        name: resource
+        required: true
+        type: string
+      - description: Generic request body for POST/PATCH
+        in: body
+        name: defaultRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.DefaultRequest'
+      - description: Example1 object to create/overwrite
+        in: body
+        name: example1
+        schema:
+          $ref: '#/definitions/models.Example1'
+      - description: Example2 object to create/overwrite
+        in: body
+        name: example2
+        schema:
+          $ref: '#/definitions/models.Example2'
+      - description: ExampleRelational to create/overwrite
+        in: body
+        name: ExampleRelational
+        schema:
+          $ref: '#/definitions/models.ExampleRelational'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Returns the created/updated object
+          schema: {}
+        "400":
+          description: Invalid input JSON
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: 'Forbidden: Admins only'
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
       security:
       - ApiKeyAuth: []
-      - ApiKeyAuth.: []
-      summary: Setup admin routes
+      summary: 'Admin: create/overwrite or update a resource'
+      tags:
+      - admin
+    put:
+      consumes:
+      - application/json
+      description: Allows admin to create (POST), overwrite (PUT), or update (PATCH)
+        any resource.
+      parameters:
+      - description: Resource type
+        enum:
+        - user
+        - example1
+        - example2
+        - exampleRelational
+        in: path
+        name: resource
+        required: true
+        type: string
+      - description: Generic request body for POST/PATCH
+        in: body
+        name: defaultRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.DefaultRequest'
+      - description: Example1 object to create/overwrite
+        in: body
+        name: example1
+        schema:
+          $ref: '#/definitions/models.Example1'
+      - description: Example2 object to create/overwrite
+        in: body
+        name: example2
+        schema:
+          $ref: '#/definitions/models.Example2'
+      - description: ExampleRelational to create/overwrite
+        in: body
+        name: ExampleRelational
+        schema:
+          $ref: '#/definitions/models.ExampleRelational'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Returns the created/updated object
+          schema: {}
+        "400":
+          description: Invalid input JSON
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: 'Forbidden: Admins only'
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 'Admin: create/overwrite or update a resource'
+      tags:
+      - admin
+  /{resource}/{id}:
+    delete:
+      description: If “resource=user”, GET /user returns all users (paginated & filterable).
+        DELETE /{resource}/{id} deletes the specified item.
+      parameters:
+      - description: Resource type
+        enum:
+        - user
+        - example1
+        - example2
+        - exampleRelational
+        in: path
+        name: resource
+        required: true
+        type: string
+      - description: Resource ID (for delete operations)
+        in: path
+        name: id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'For GET /user: array of users; for DELETE: { message: \"Deleted
+            successfully\" }'
+          schema: {}
+        "400":
+          description: Invalid resource
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: 'Forbidden: Admins only'
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 'Admin: list users or delete a resource by ID'
+      tags:
+      - admin
+    get:
+      description: Returns a paginated list of items for the given resource, applying
+        any query-string filters (e.g., ?status=active&category=books). To fetch a
+        single item, include “/{id}”.
+      parameters:
+      - description: Resource type
+        enum:
+        - example1
+        - example2
+        - exampleRelational
+        in: path
+        name: resource
+        required: true
+        type: string
+      - description: Resource ID (when fetching a single item)
+        in: path
+        name: id
+        type: string
+      - default: 1
+        description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - default: 10
+        description: 'Number of items per page (default: 10)'
+        in: query
+        name: per_page
+        type: integer
+      - description: Any other key=value acts as a filter (e.g., ?status=active).
+          Multiple filters allowed.
+        in: query
+        name: '*'
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'Returns { data: [...], meta: {...}, links: {...} }'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Retrieve resources (paginated & filterable) or a single resource by
+        ID
+      tags:
+      - resources
+    patch:
+      consumes:
+      - application/json
+      description: Allows admin to create (POST), overwrite (PUT), or update (PATCH)
+        any resource.
+      parameters:
+      - description: Resource type
+        enum:
+        - user
+        - example1
+        - example2
+        - exampleRelational
+        in: path
+        name: resource
+        required: true
+        type: string
+      - description: Resource ID (for PATCH)
+        in: path
+        name: id
+        type: string
+      - description: Generic request body for POST/PATCH
+        in: body
+        name: defaultRequest
+        required: true
+        schema:
+          $ref: '#/definitions/models.DefaultRequest'
+      - description: Example1 object to create/overwrite
+        in: body
+        name: example1
+        schema:
+          $ref: '#/definitions/models.Example1'
+      - description: Example2 object to create/overwrite
+        in: body
+        name: example2
+        schema:
+          $ref: '#/definitions/models.Example2'
+      - description: ExampleRelational to create/overwrite
+        in: body
+        name: ExampleRelational
+        schema:
+          $ref: '#/definitions/models.ExampleRelational'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Returns the created/updated object
+          schema: {}
+        "400":
+          description: Invalid input JSON
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: 'Forbidden: Admins only'
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 'Admin: create/overwrite or update a resource'
       tags:
       - admin
 schemes:

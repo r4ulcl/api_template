@@ -154,8 +154,11 @@ curl -X GET "http://localhost:8080/xxxxxxx" \
 ## **TODO**
 
 - [ ] User manage section, get info, change password, etc. Rol user too
+   - [ ] Change password
+   - [ ] Get user info
 - [ ] Bool in .env to swagger
-- [ ] Paginate API
+- [x] Paginate API
+- [x] Filters in GET
 
 
 ---
