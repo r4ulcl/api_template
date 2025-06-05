@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 // Config struct holds the configuration variables needed for connecting to a database and managing JWT.
@@ -14,7 +15,30 @@ type Config struct {
 	DBName        string // Database name (e.g., "demo_db")
 	JWTSecret     string // JWT secret key for token signing
 	AdminPassword string // Admin password (e.g., "admin_secret")
-	UserGUI       string // Allow user to access stats
+	UserGUI       bool   // Allow user to access stats
+	Swagger       bool   // Enable swagger endpoint
+}
+
+// getEnv fetches an environment variable or returns the provided default value.
+func getEnv(key, defaultVal string) string {
+	if val, exists := os.LookupEnv(key); exists {
+		return val
+	}
+	return defaultVal
+}
+
+// getEnvAsBool fetches an environment variable and parses it as a boolean.
+// If the variable is not set or cannot be parsed, it returns the given default value.
+func getEnvAsBool(key string, defaultVal bool) bool {
+	valStr := getEnv(key, "")
+	if valStr == "" {
+		return defaultVal
+	}
+	parsedVal, err := strconv.ParseBool(valStr)
+	if err != nil {
+		return defaultVal
+	}
+	return parsedVal
 }
 
 // LoadConfig loads environment variables or uses default values for database and authentication configuration.
@@ -27,7 +51,8 @@ func LoadConfig() *Config {
 		DBName:        getEnv("DB_NAME", "demo_db"),                // Default: demo_db
 		JWTSecret:     getEnv("JWT_SECRET", "your_jwt_secret_key"), // Default: "your_jwt_secret_key"
 		AdminPassword: getEnv("ADMIN_PASSWORD", ""),                // Default: empty string
-		UserGUI:       getEnv("USER_GUI", "false"),
+		UserGUI:       getEnvAsBool("USER_GUI", false),             // Default: false
+		Swagger:       getEnvAsBool("SWAGGER", false),              // Default: false
 	}
 }
 
@@ -41,15 +66,4 @@ func (c *Config) DSN() string {
 		c.DBPort,
 		c.DBName,
 	)
-}
-
-// getEnv retrieves the value of an environment variable or returns a default value if the variable is not set.
-func getEnv(key, defaultVal string) string {
-	// os.LookupEnv checks if the environment variable exists and returns its value if found.
-	// If not found, it returns the default value provided as the second argument.
-	if val, ok := os.LookupEnv(key); ok {
-		return val
-	}
-
-	return defaultVal
 }

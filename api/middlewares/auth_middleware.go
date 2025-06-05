@@ -67,15 +67,28 @@ func AuthMiddleware(secret string) func(http.Handler) http.Handler {
 	}
 }
 
-// AdminOnly restricts access to users whose role is "admin".
-func AdminOnly(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		role := r.Context().Value(ContextRole)
-		if role != "admin" {
+// RoleMiddleware restricts access to users whose role is one of the allowedRoles.
+// It reads the role from the request context (ContextRole) and returns 403 if no match.
+func RoleMiddleware(allowedRoles ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Extract the role from context
+			roleVal := r.Context().Value(ContextRole)
+			role, _ := roleVal.(string)
+
+			// Check if the user’s role is in the allowed list
+			for _, allowed := range allowedRoles {
+				if role == allowed {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			// If no match, forbid
 			w.WriteHeader(http.StatusForbidden)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Forbidden: Admins only"})
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Error: "Forbidden: insufficient permissions",
+			})
+		})
+	}
 }

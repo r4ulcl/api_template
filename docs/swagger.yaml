@@ -1,56 +1,41 @@
 basePath: /
 definitions:
-  models.DefaultRequest:
+  controllers.paginatedResponse:
     properties:
-      field:
-        description: Field is a placeholder for data that might be required in some
-          requests.
+      data: {}
+      links:
+        $ref: '#/definitions/controllers.paginationLinks'
+      meta:
+        $ref: '#/definitions/controllers.paginationMeta'
+    type: object
+  controllers.paginationLinks:
+    properties:
+      first:
         type: string
+      last:
+        type: string
+      next:
+        type: string
+      prev:
+        type: string
+      self:
+        type: string
+    type: object
+  controllers.paginationMeta:
+    properties:
+      current_page:
+        type: integer
+      page_size:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
     type: object
   models.ErrorResponse:
     properties:
       error:
         description: Error contains a descriptive error message.
-        type: string
-    type: object
-  models.Example1:
-    properties:
-      field1:
-        description: Field1 is the primary key of the Example1 table.
-        type: string
-      field2:
-        description: Field2 stores additional data related to Example1.
-        type: string
-    type: object
-  models.Example2:
-    properties:
-      field1:
-        type: string
-      field2:
-        type: string
-    type: object
-  models.ExampleRelational:
-    properties:
-      example1_field1:
-        description: Example1Field1 is a foreign key referencing Example1.
-        type: string
-      example1Reference:
-        allOf:
-        - $ref: '#/definitions/models.Example1'
-        description: |-
-          Example1Reference establishes a foreign key relationship with Example1.
-          Updates and deletions on Example1 cascade to ExampleRelational.
-      example2_field1:
-        description: Example2Field1 is a foreign key referencing Example2.
-        type: string
-      example2Reference:
-        allOf:
-        - $ref: '#/definitions/models.Example2'
-        description: |-
-          Example2Reference establishes a foreign key relationship with Example2.
-          Updates and deletions on Example2 cascade to ExampleRelational.
-      field3:
-        description: Field3 stores additional relationship-related information.
         type: string
     type: object
   models.JWTResponse:
@@ -88,336 +73,209 @@ info:
 paths:
   /{resource}:
     get:
-      description: Returns a paginated list of items for the given resource, applying
-        any query-string filters (e.g., ?status=active&category=books). To fetch a
-        single item, include “/{id}”.
+      consumes:
+      - application/json
+      description: Retrieves records of a given resource, supporting complex filters,
+        sorting, and pagination.
       parameters:
-      - description: Resource type
-        enum:
-        - example1
-        - example2
-        - exampleRelational
+      - description: Resource name (e.g., users, items)
         in: path
         name: resource
         required: true
         type: string
-      - default: 1
-        description: 'Page number (default: 1)'
+      - description: Page number (default is 1)
         in: query
         name: page
         type: integer
-      - default: 10
-        description: 'Number of items per page (default: 10)'
+      - description: Items per page (default is 1000)
         in: query
         name: page_size
         type: integer
-      - description: Any other key=value acts as a filter (e.g., ?status=active).
-          Multiple filters allowed.
+      - description: Comma-separated sort fields, prefix with '-' for DESC
         in: query
-        name: '*'
+        name: sort
+        type: string
+      - description: Filter parameters of the form filter[field][op]=value (repeatable)
+        in: query
+        name: filter
         type: string
       produces:
       - application/json
       responses:
         "200":
-          description: 'Returns { data: [...], meta: {...}, links: {...} }'
+          description: Paginated list of records
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/controllers.paginatedResponse'
         "400":
-          description: Invalid request
+          description: Invalid query parameters
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
-      summary: Retrieve resources (paginated & filterable) or a single resource by
-        ID
+      summary: Get a paginated list of records
       tags:
-      - resources
+      - user
+      - admin
     post:
       consumes:
       - application/json
-      description: Allows admin to create (POST), overwrite (PUT), or update (PATCH)
-        any resource.
+      description: Accepts either a single JSON object or an array of JSON objects
+        for the given resource.
       parameters:
-      - description: Resource type
-        enum:
-        - user
-        - example1
-        - example2
-        - exampleRelational
+      - description: Resource name (e.g., users, items)
         in: path
         name: resource
         required: true
         type: string
-      - description: Generic request body for POST/PATCH
+      - description: If true, for single object duplicates → update instead of error
+        in: query
+        name: overwrite
+        type: boolean
+      - description: A single JSON object or an array of JSON objects matching model
+          schema
         in: body
-        name: defaultRequest
+        name: payload
         required: true
         schema:
-          $ref: '#/definitions/models.DefaultRequest'
-      - description: Example1 object to create/overwrite
-        in: body
-        name: example1
-        schema:
-          $ref: '#/definitions/models.Example1'
-      - description: Example2 object to create/overwrite
-        in: body
-        name: example2
-        schema:
-          $ref: '#/definitions/models.Example2'
-      - description: ExampleRelational to create/overwrite
-        in: body
-        name: ExampleRelational
-        schema:
-          $ref: '#/definitions/models.ExampleRelational'
+          type: object
       produces:
       - application/json
       responses:
         "201":
-          description: Returns the created/updated object
-          schema: {}
+          description: The created record, or list of created records
+          schema:
+            type: object
         "400":
-          description: Invalid input JSON
+          description: Bad request (invalid JSON or missing fields)
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-        "403":
-          description: 'Forbidden: Admins only'
+        "409":
+          description: Conflict (duplicate key and overwrite=false) for single object
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
-      summary: 'Admin: create/overwrite or update a resource'
-      tags:
-      - admin
-    put:
-      consumes:
-      - application/json
-      description: Allows admin to create (POST), overwrite (PUT), or update (PATCH)
-        any resource.
-      parameters:
-      - description: Resource type
-        enum:
-        - user
-        - example1
-        - example2
-        - exampleRelational
-        in: path
-        name: resource
-        required: true
-        type: string
-      - description: Generic request body for POST/PATCH
-        in: body
-        name: defaultRequest
-        required: true
-        schema:
-          $ref: '#/definitions/models.DefaultRequest'
-      - description: Example1 object to create/overwrite
-        in: body
-        name: example1
-        schema:
-          $ref: '#/definitions/models.Example1'
-      - description: Example2 object to create/overwrite
-        in: body
-        name: example2
-        schema:
-          $ref: '#/definitions/models.Example2'
-      - description: ExampleRelational to create/overwrite
-        in: body
-        name: ExampleRelational
-        schema:
-          $ref: '#/definitions/models.ExampleRelational'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Returns the created/updated object
-          schema: {}
-        "400":
-          description: Invalid input JSON
-          schema:
-            $ref: '#/definitions/models.ErrorResponse'
-        "403":
-          description: 'Forbidden: Admins only'
-          schema:
-            $ref: '#/definitions/models.ErrorResponse'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
-      summary: 'Admin: create/overwrite or update a resource'
+      summary: Create one or more records
       tags:
       - admin
   /{resource}/{id}:
     delete:
-      description: If “resource=user”, GET /user returns all users (paginated & filterable).
-        DELETE /{resource}/{id} deletes the specified item.
+      consumes:
+      - application/json
+      description: Deletes a resource identified by its primary key (or hyphen-separated
+        composite key).
       parameters:
-      - description: Resource type
-        enum:
-        - user
-        - example1
-        - example2
-        - exampleRelational
+      - description: Resource name (e.g., users, items)
         in: path
         name: resource
         required: true
         type: string
-      - description: Resource ID (for delete operations)
+      - description: Primary key (or hyphen-separated composite key)
         in: path
         name: id
+        required: true
         type: string
       produces:
       - application/json
       responses:
         "200":
-          description: 'For GET /user: array of users; for DELETE: { message: \"Deleted
-            successfully\" }'
-          schema: {}
-        "400":
-          description: Invalid resource
+          description: Success message
           schema:
-            $ref: '#/definitions/models.ErrorResponse'
-        "403":
-          description: 'Forbidden: Admins only'
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Record not found
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
-      summary: 'Admin: list users or delete a resource by ID'
+      summary: Delete a record
       tags:
       - admin
     get:
-      description: Returns a paginated list of items for the given resource, applying
-        any query-string filters (e.g., ?status=active&category=books). To fetch a
-        single item, include “/{id}”.
+      consumes:
+      - application/json
+      description: Fetches a single resource by its ID (supports composite keys via
+        hyphen-separated format).
       parameters:
-      - description: Resource type
-        enum:
-        - example1
-        - example2
-        - exampleRelational
+      - description: Resource name (e.g., users, items)
         in: path
         name: resource
         required: true
         type: string
-      - description: Resource ID (when fetching a single item)
+      - description: Primary key (or hyphen-separated composite key)
         in: path
         name: id
-        type: string
-      - default: 1
-        description: 'Page number (default: 1)'
-        in: query
-        name: page
-        type: integer
-      - default: 10
-        description: 'Number of items per page (default: 10)'
-        in: query
-        name: page_size
-        type: integer
-      - description: Any other key=value acts as a filter (e.g., ?status=active).
-          Multiple filters allowed.
-        in: query
-        name: '*'
+        required: true
         type: string
       produces:
       - application/json
       responses:
         "200":
-          description: 'Returns { data: [...], meta: {...}, links: {...} }'
+          description: The requested record
           schema:
-            additionalProperties: true
             type: object
-        "400":
-          description: Invalid request
+        "404":
+          description: Record not found
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
-      summary: Retrieve resources (paginated & filterable) or a single resource by
-        ID
+      summary: Get a record by ID
       tags:
-      - resources
-    patch:
+      - user
+      - admin
+    put:
       consumes:
       - application/json
-      description: Allows admin to create (POST), overwrite (PUT), or update (PATCH)
-        any resource.
+      description: Accepts a JSON payload to update an existing resource. The `id`
+        in the path is used to locate the record.
       parameters:
-      - description: Resource type
-        enum:
-        - user
-        - example1
-        - example2
-        - exampleRelational
+      - description: Resource name (e.g., users, items)
         in: path
         name: resource
         required: true
         type: string
-      - description: Resource ID (for PATCH)
+      - description: Primary key (or hyphen-separated composite key)
         in: path
         name: id
+        required: true
         type: string
-      - description: Generic request body for POST/PATCH
+      - description: JSON object with fields to update (non-zero fields will be updated)
         in: body
-        name: defaultRequest
+        name: payload
         required: true
         schema:
-          $ref: '#/definitions/models.DefaultRequest'
-      - description: Example1 object to create/overwrite
-        in: body
-        name: example1
-        schema:
-          $ref: '#/definitions/models.Example1'
-      - description: Example2 object to create/overwrite
-        in: body
-        name: example2
-        schema:
-          $ref: '#/definitions/models.Example2'
-      - description: ExampleRelational to create/overwrite
-        in: body
-        name: ExampleRelational
-        schema:
-          $ref: '#/definitions/models.ExampleRelational'
+          type: object
       produces:
       - application/json
       responses:
-        "201":
-          description: Returns the created/updated object
-          schema: {}
+        "200":
+          description: The updated record
+          schema:
+            type: object
         "400":
           description: Invalid input JSON
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-        "403":
-          description: 'Forbidden: Admins only'
+        "404":
+          description: Record not found
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
-      summary: 'Admin: create/overwrite or update a resource'
+      summary: Update a record
       tags:
       - admin
   /login:
@@ -509,34 +367,6 @@ paths:
       summary: Authenticate user via PUT
       tags:
       - auth
-  /user:
-    get:
-      description: If “resource=user”, GET /user returns all users (paginated & filterable).
-        DELETE /{resource}/{id} deletes the specified item.
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 'For GET /user: array of users; for DELETE: { message: \"Deleted
-            successfully\" }'
-          schema: {}
-        "400":
-          description: Invalid resource
-          schema:
-            $ref: '#/definitions/models.ErrorResponse'
-        "403":
-          description: 'Forbidden: Admins only'
-          schema:
-            $ref: '#/definitions/models.ErrorResponse'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/models.ErrorResponse'
-      security:
-      - ApiKeyAuth: []
-      summary: 'Admin: list users or delete a resource by ID'
-      tags:
-      - admin
 schemes:
 - http
 - https

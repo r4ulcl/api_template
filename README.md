@@ -160,7 +160,8 @@ curl -X GET "http://localhost:8080/xxxxxxx" \
 - [x] Paginate API
 - [x] Filters in GET
 - [ ] Allow insert array of JSON `[{}]`
-
+- [x] Allow sort `limit=20&page=3&sort=created_at:desc`
+- [x] Allow advanced filters
 
 ---
 

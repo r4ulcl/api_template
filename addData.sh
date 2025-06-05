@@ -1,59 +1,83 @@
-JWT=`curl -X 'POST' 'http://127.0.0.1:8088/login'  -d '{
- "password": "SuperSecurePassword",
- "username": "admin"
-}' | jq .token | tr -d '"'`
+#!/bin/bash
 
-# example1
-curl -X 'POST' 'http://127.0.0.1:8088/example1' -H 'Authorization: '$JWT'' -d '{
- "field1": "field1Value1",
- "field2": "field2Value1"
-}'
+BASE_URL="http://127.0.0.1:7080"
+DELETE_AFTER_INSERT=false
 
-curl -X 'POST' 'http://127.0.0.1:8088/example1' -H 'Authorization: '$JWT'' -d '{
- "field1": "field1Value2",
- "field2": "field2Value2"
-}'
+# Authenticate
+JWT=$(curl -s -X POST "$BASE_URL/login" -d '{ "username": "admin", "password": "admin" }' | jq -r .token)
+AUTH_HEADER="Authorization: $JWT"
 
-curl -X 'POST' 'http://127.0.0.1:8088/example1' -H 'Authorization: '$JWT'' -d '{
- "field1": "field1Value3",
- "field2": "field2Value3"
-}'
+# Base64-encoded sample images (shortened for readability)
+BASE64_IMAGE1="data:image/png;base64,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"
 
-curl -X 'GET' 'http://127.0.0.1:8088/example1' -H 'Authorization: '$JWT'' | jq
+BASE64_IMAGE2="data:image/png;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCABkAMgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDiqKKK+aPjwooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiivR/CWgaBN8PtR13U9K+2z2ssmB9okj3KFUgfKcDqecVdOm6jsjWlSdWVk/M84or0fTPDfhzxvpV42hW0+l6pbDd9necyxvnpyee2M8Y964jTND1PWbtrXT7KW4mT76qMbfqTwPxpypSVra32sOdCUbW1vtYz6K2NY8La3oCJJqenyQRucB8hlz6ZUkZq2ngPxPJ9l2aU7i6TzIisiEFcA5J3fL94dcdaXs53tZk+yqXtyu/oc5RXS6Z4K1a48V2+i3tlNC5ZXnG5QRDuAZ1J4OAT0zWn40+Ht34flnu9Pgml0iFELXE00ZYMTjGBg9SO1P2M+VytsUsPU5HO2iOHooorMxCiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAK9Y8HwTXXwd1uC3iklmeWUJHGpZmO1OAB1ryer1nreradCYbHU722iLbikFw6Ln1wD14Fa0aihJt9jfD1VTk2+qaPTPh1pVx4StNT1/Xo2sLfygiJMNrtzk/Kec8AAd81N8PLu3vvCniFIrUXN/LPJM9qsxieVGUYUMORzuH4+9eUXmpX2oMGvb24uSvQzSs+PzNR29zPaTLNbTSQyr0eNyrD8RWscQo2SWiv+JtDFqDiorRX9dT0vUtVvLfwPqOmR+B7vTtOIy0lxduwjYsACA65POOAfetPx1p+raj4O8NxaXFPNtjRpIoMlvuLtbA5wOee2RXlF5q2pagoW91C7uQOgmmZ8fma6vxR43h1TTdCi0lr60utPiKSS5EeSVUfKVYn+E+lUq0ZRkn2XbuWsRGUJKT6JdF18kdf4ymjh1rwLBeSKdRhuImnYnkDdGCSfQkH8jXOfFnTL7/hKZdQFnObPyIwbgRkxg9MFugOa4G4uZ7udp7meSaZvvSSOWY/UmrVxrerXVobW41S9mtjj9zJcOycdOCcVFSupqSa3/Qirio1FJNb2/BWKFFFFcxxBRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQB//2Q=="
 
-# DELETE
-curl -X 'DELETE' 'http://127.0.0.1:8088/example1/field1Value1' -H 'Authorization: '$JWT'' 
-curl -X 'DELETE' 'http://127.0.0.1:8088/example1/field1Value2' -H 'Authorization: '$JWT'' 
-curl -X 'DELETE' 'http://127.0.0.1:8088/example1/field1Value3' -H 'Authorization: '$JWT'' 
-curl -X 'DELETE' 'http://127.0.0.1:8088/example1/field1Value4' -H 'Authorization: '$JWT'' 
+BASE64_IMAGE3="data:image/png;base64,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"
 
-curl -X 'GET' 'http://127.0.0.1:8088/example1' -H 'Authorization: '$JWT'' | jq
+IMAGES=("$BASE64_IMAGE1" "$BASE64_IMAGE2" "$BASE64_IMAGE3")
 
+# Helper to pick random image
+get_random_image() {
+  echo "${IMAGES[$((RANDOM % 3))]}"
+}
 
-# example2
-curl -X 'POST' 'http://127.0.0.1:8088/example2' -H 'Authorization: '$JWT'' -d '{
- "field1": "field1Value1",
- "field2": "field2Value1"
-}'
+# Fixed ID insert loop
+declare -a EX1_IDS
+declare -a EX2_IDS
 
-curl -X 'POST' 'http://127.0.0.1:8088/example2' -H 'Authorization: '$JWT'' -d '{
- "field1": "field1Value2",
- "field2": "field2Value2"
-}'
+for i in $(seq -w 1 100); do
+  ID1="user_$i"
+  ID2="dep_$i"
 
-curl -X 'POST' 'http://127.0.0.1:8088/example2' -H 'Authorization: '$JWT'' -d '{
- "field1": "field1Value3",
- "field2": "field2Value3"
-}'
+  # Every 5th: image, otherwise: email
+  if (( 10#$i % 5 == 0 )); then
+    F2_EX1=$(get_random_image)
+  else
+    F2_EX1="user$i@example.com"
+  fi
 
-curl -X 'GET' 'http://127.0.0.1:8088/example2' -H 'Authorization: '$JWT'' | jq
+  curl -s -X POST "$BASE_URL/example1" \
+    -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+    -d "{\"field1\": \"$ID1\", \"field2\": \"$F2_EX1\"}" > /dev/null
+  EX1_IDS+=("$ID1")
 
+  # Every 7th: image, otherwise: department
+  if (( 10#$i % 5 == 0 )); then
+    F2_EX2=$(get_random_image)
+  else
+    F2_EX2="Department $i"
+  fi
 
-# Relational
-curl -X 'POST' 'http://127.0.0.1:8088/exampleRelational' -H 'Authorization: '$JWT'' -d '{
- "example1_field1": "field1Value1",
- "example2_field1": "field1Value2",
- "Field3": "test1"
-}'
+  curl -s -X POST "$BASE_URL/example2" \
+    -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+    -d "{\"field1\": \"$ID2\", \"field2\": \"$F2_EX2\"}" > /dev/null
+  EX2_IDS+=("$ID2")
+done
 
-curl -X 'GET' 'http://127.0.0.1:8088/exampleRelational' -H 'Authorization: '$JWT'' | jq
+# Create relational entries
+for i in $(seq -w 1 30); do
+  REL_NOTE="Relation $i"
+  ID1="user_0$i"
+  ID2="dep_0$i"
+
+  curl -s -X POST "$BASE_URL/exampleRelational" \
+    -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+    -d "{\"example1_field1\": \"$ID1\", \"example2_field1\": \"$ID2\", \"Field3\": \"$REL_NOTE\"}" > /dev/null
+done
+
+echo "✅ All fixed-ID records created with images where appropriate."
+
+# Optional delete logic
+if [ "$DELETE_AFTER_INSERT" = true ]; then
+  echo "🧹 Cleaning up..."
+
+  for id in "${EX1_IDS[@]}"; do
+    curl -s -X DELETE "$BASE_URL/example1/$id" -H "$AUTH_HEADER" > /dev/null
+  done
+
+  for id in "${EX2_IDS[@]}"; do
+    curl -s -X DELETE "$BASE_URL/example2/$id" -H "$AUTH_HEADER" > /dev/null
+  done
+
+  echo "✅ Cleanup complete."
+fi
