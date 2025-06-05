@@ -159,6 +159,7 @@ curl -X GET "http://localhost:8080/xxxxxxx" \
 - [ ] Bool in .env to swagger
 - [x] Paginate API
 - [x] Filters in GET
+- [ ] Allow insert array of JSON `[{}]`
 
 
 ---

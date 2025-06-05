@@ -89,7 +89,6 @@ func (ac *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Login handles both user login (POST), token renewal (PUT), and fetching user info (GET).
 func (ac *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -107,6 +106,18 @@ func (ac *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleLogin processes POST /login: authenticates and returns a JWT token.
+// Login handles both user login (POST), token renewal (PUT), and fetching user info (GET).
+// @Summary     Authenticate a user and issue a JWT (POST)
+// @Description Accepts JSON credentials (username + password) and returns a token if valid.
+// @Tags        auth
+// @Accept      json
+// @Produce     json
+// @Param       credentials  body      models.LoginRequest   true  "Username and password"
+// @Success     200          {object}  models.JWTResponse    "JWT token returned"
+// @Failure     400          {object}  models.ErrorResponse  "Missing or invalid fields"
+// @Failure     401          {object}  models.ErrorResponse  "Unauthorized (invalid credentials)"
+// @Failure     500          {object}  models.ErrorResponse  "Internal server error"
+// @Router      /login [post]
 func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Username string `json:"username"`
@@ -154,6 +165,16 @@ func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
 }
 
+// @Summary     Authenticate user via query params (GET)
+// @Description Accepts username and password as query parameters and returns a token if valid.
+// @Tags        auth
+// @Accept      json
+// @Produce     json
+// @Success     200       {object}  models.JWTResponse    "JWT token returned"
+// @Failure     400       {object}  models.ErrorResponse  "Missing or invalid fields"
+// @Failure     401       {object}  models.ErrorResponse  "Unauthorized (invalid credentials)"
+// @Failure     500       {object}  models.ErrorResponse  "Internal server error"
+// @Router      /login [get]
 func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Request) {
 	// Retrieve user ID from context (set by AuthMiddleware)
 	userIDVal := r.Context().Value(middlewares.ContextUserID)
@@ -178,6 +199,17 @@ func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(user)
 }
+
+// @Summary     Authenticate user via PUT
+// @Description Accepts JSON credentials (username + password) using PUT. Returns a JWT if valid.
+// @Tags        auth
+// @Accept      json
+// @Produce     json
+// @Success     200          {object}  models.JWTResponse    "JWT token returned"
+// @Failure     400          {object}  models.ErrorResponse  "Missing or invalid fields"
+// @Failure     401          {object}  models.ErrorResponse  "Unauthorized (invalid credentials)"
+// @Failure     500          {object}  models.ErrorResponse  "Internal server error"
+// @Router      /login [put]
 func (ac *AuthController) handleRenewToken(w http.ResponseWriter, r *http.Request) {
 	// Retrieve username and role from context (set by AuthMiddleware)
 	userIDVal := r.Context().Value(middlewares.ContextUserID)

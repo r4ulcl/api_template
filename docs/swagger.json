@@ -21,7 +21,137 @@
     },
     "basePath": "/",
     "paths": {
-        "/{resource}": {
+        "/login": {
+            "get": {
+                "description": "Accepts username and password as query parameters and returns a token if valid.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Authenticate user via query params (GET)",
+                "responses": {
+                    "200": {
+                        "description": "JWT token returned",
+                        "schema": {
+                            "$ref": "#/definitions/models.JWTResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing or invalid fields",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized (invalid credentials)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Accepts JSON credentials (username + password) using PUT. Returns a JWT if valid.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Authenticate user via PUT",
+                "responses": {
+                    "200": {
+                        "description": "JWT token returned",
+                        "schema": {
+                            "$ref": "#/definitions/models.JWTResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing or invalid fields",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized (invalid credentials)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Accepts JSON credentials (username + password) and returns a token if valid.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Authenticate a user and issue a JWT (POST)",
+                "parameters": [
+                    {
+                        "description": "Username and password",
+                        "name": "credentials",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.LoginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "JWT token returned",
+                        "schema": {
+                            "$ref": "#/definitions/models.JWTResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing or invalid fields",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized (invalid credentials)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/user": {
             "get": {
                 "security": [
                     {
@@ -36,21 +166,6 @@
                     "admin"
                 ],
                 "summary": "Admin: list users or delete a resource by ID",
-                "parameters": [
-                    {
-                        "enum": [
-                            "user",
-                            "example1",
-                            "example2",
-                            "exampleRelational"
-                        ],
-                        "type": "string",
-                        "description": "Resource type",
-                        "name": "resource",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "For GET /user: array of users; for DELETE: { message: \\\"Deleted successfully\\\" }",
@@ -64,6 +179,78 @@
                     },
                     "403": {
                         "description": "Forbidden: Admins only",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/{resource}": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns a paginated list of items for the given resource, applying any query-string filters (e.g., ?status=active\u0026category=books). To fetch a single item, include “/{id}”.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "resources"
+                ],
+                "summary": "Retrieve resources (paginated \u0026 filterable) or a single resource by ID",
+                "parameters": [
+                    {
+                        "enum": [
+                            "example1",
+                            "example2",
+                            "exampleRelational"
+                        ],
+                        "type": "string",
+                        "description": "Resource type",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number (default: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Number of items per page (default: 10)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Any other key=value acts as a filter (e.g., ?status=active). Multiple filters allowed.",
+                        "name": "*",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Returns { data: [...], meta: {...}, links: {...} }",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -302,7 +489,7 @@
                         "type": "integer",
                         "default": 10,
                         "description": "Number of items per page (default: 10)",
-                        "name": "per_page",
+                        "name": "page_size",
                         "in": "query"
                     },
                     {
@@ -564,6 +751,32 @@
                 },
                 "field3": {
                     "description": "Field3 stores additional relationship-related information.",
+                    "type": "string"
+                }
+            }
+        },
+        "models.JWTResponse": {
+            "type": "object",
+            "properties": {
+                "token": {
+                    "description": "Token is the JWT token assigned to the authenticated user.",
+                    "type": "string"
+                }
+            }
+        },
+        "models.LoginRequest": {
+            "type": "object",
+            "required": [
+                "password",
+                "username"
+            ],
+            "properties": {
+                "password": {
+                    "description": "Password is the user's password used for authentication.",
+                    "type": "string"
+                },
+                "username": {
+                    "description": "Username is the unique identifier for the user attempting to log in.",
                     "type": "string"
                 }
             }

@@ -57,7 +57,7 @@ type paginatedResponse struct {
 
 type paginationMeta struct {
 	CurrentPage int   `json:"current_page"`
-	PerPage     int   `json:"per_page"`
+	PerPage     int   `json:"page_size"`
 	TotalItems  int64 `json:"total_items"`
 	TotalPages  int   `json:"total_pages"`
 }
@@ -77,10 +77,10 @@ type paginationLinks struct {
 func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// 1) Parse "page" and "per_page" parameters (with defaults)
+	// 1) Parse "page" and "page_size" parameters (with defaults)
 	queryVals := r.URL.Query()
 	pageParam := queryVals.Get("page")
-	perPageParam := queryVals.Get("per_page")
+	perPageParam := queryVals.Get("page_size")
 
 	page := 1
 	perPage := 1000
@@ -92,11 +92,11 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 		perPage = pp
 	}
 
-	// 2) Build a copy of the query parameters for filtering (exclude page & per_page)
+	// 2) Build a copy of the query parameters for filtering (exclude page & page_size)
 	filters := make(map[string]interface{})
 	for key, vals := range queryVals {
 		// Skip pagination keys
-		if key == "page" || key == "per_page" {
+		if key == "page" || key == "page_size" {
 			continue
 		}
 		if len(vals) > 0 {
@@ -144,7 +144,7 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 	// 8) Build pagination links (self, first, prev, next, last)
 	//    We take the original URL Path + rebuilt Query (adjusting page).
 	basePath := r.URL.Path
-	qs := copyQueryExcluding(queryVals, []string{"page", "per_page"})
+	qs := copyQueryExcluding(queryVals, []string{"page", "page_size"})
 
 	// a) helper to construct a URL string with updated page
 	makeLink := func(p int) string {
@@ -156,7 +156,7 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 			}
 		}
 		local.Set("page", strconv.Itoa(p))
-		local.Set("per_page", strconv.Itoa(perPage))
+		local.Set("page_size", strconv.Itoa(perPage))
 		return basePath + "?" + local.Encode()
 	}
 

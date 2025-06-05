@@ -53,6 +53,25 @@ definitions:
         description: Field3 stores additional relationship-related information.
         type: string
     type: object
+  models.JWTResponse:
+    properties:
+      token:
+        description: Token is the JWT token assigned to the authenticated user.
+        type: string
+    type: object
+  models.LoginRequest:
+    properties:
+      password:
+        description: Password is the user's password used for authentication.
+        type: string
+      username:
+        description: Username is the unique identifier for the user attempting to
+          log in.
+        type: string
+    required:
+    - password
+    - username
+    type: object
 info:
   contact:
     email: support@yourdomain.com
@@ -69,12 +88,12 @@ info:
 paths:
   /{resource}:
     get:
-      description: If “resource=user”, GET /user returns all users (paginated & filterable).
-        DELETE /{resource}/{id} deletes the specified item.
+      description: Returns a paginated list of items for the given resource, applying
+        any query-string filters (e.g., ?status=active&category=books). To fetch a
+        single item, include “/{id}”.
       parameters:
       - description: Resource type
         enum:
-        - user
         - example1
         - example2
         - exampleRelational
@@ -82,19 +101,31 @@ paths:
         name: resource
         required: true
         type: string
+      - default: 1
+        description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - default: 10
+        description: 'Number of items per page (default: 10)'
+        in: query
+        name: page_size
+        type: integer
+      - description: Any other key=value acts as a filter (e.g., ?status=active).
+          Multiple filters allowed.
+        in: query
+        name: '*'
+        type: string
       produces:
       - application/json
       responses:
         "200":
-          description: 'For GET /user: array of users; for DELETE: { message: \"Deleted
-            successfully\" }'
-          schema: {}
-        "400":
-          description: Invalid resource
+          description: 'Returns { data: [...], meta: {...}, links: {...} }'
           schema:
-            $ref: '#/definitions/models.ErrorResponse'
-        "403":
-          description: 'Forbidden: Admins only'
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "500":
@@ -103,9 +134,10 @@ paths:
             $ref: '#/definitions/models.ErrorResponse'
       security:
       - ApiKeyAuth: []
-      summary: 'Admin: list users or delete a resource by ID'
+      summary: Retrieve resources (paginated & filterable) or a single resource by
+        ID
       tags:
-      - admin
+      - resources
     post:
       consumes:
       - application/json
@@ -295,7 +327,7 @@ paths:
       - default: 10
         description: 'Number of items per page (default: 10)'
         in: query
-        name: per_page
+        name: page_size
         type: integer
       - description: Any other key=value acts as a filter (e.g., ?status=active).
           Multiple filters allowed.
@@ -386,6 +418,123 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: 'Admin: create/overwrite or update a resource'
+      tags:
+      - admin
+  /login:
+    get:
+      consumes:
+      - application/json
+      description: Accepts username and password as query parameters and returns a
+        token if valid.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: JWT token returned
+          schema:
+            $ref: '#/definitions/models.JWTResponse'
+        "400":
+          description: Missing or invalid fields
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized (invalid credentials)
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Authenticate user via query params (GET)
+      tags:
+      - auth
+    post:
+      consumes:
+      - application/json
+      description: Accepts JSON credentials (username + password) and returns a token
+        if valid.
+      parameters:
+      - description: Username and password
+        in: body
+        name: credentials
+        required: true
+        schema:
+          $ref: '#/definitions/models.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: JWT token returned
+          schema:
+            $ref: '#/definitions/models.JWTResponse'
+        "400":
+          description: Missing or invalid fields
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized (invalid credentials)
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Authenticate a user and issue a JWT (POST)
+      tags:
+      - auth
+    put:
+      consumes:
+      - application/json
+      description: Accepts JSON credentials (username + password) using PUT. Returns
+        a JWT if valid.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: JWT token returned
+          schema:
+            $ref: '#/definitions/models.JWTResponse'
+        "400":
+          description: Missing or invalid fields
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized (invalid credentials)
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Authenticate user via PUT
+      tags:
+      - auth
+  /user:
+    get:
+      description: If “resource=user”, GET /user returns all users (paginated & filterable).
+        DELETE /{resource}/{id} deletes the specified item.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'For GET /user: array of users; for DELETE: { message: \"Deleted
+            successfully\" }'
+          schema: {}
+        "400":
+          description: Invalid resource
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: 'Forbidden: Admins only'
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 'Admin: list users or delete a resource by ID'
       tags:
       - admin
 schemes:

@@ -29,12 +29,15 @@ func SetupRouter(
 	// 2) Swagger UI (no authentication required)
 	r.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)
 
-	// 3) Unprotected auth endpoints (handled by AuthController.Login for POST/GET/PUT)
-	r.HandleFunc("/login", authController.Login).Methods("POST", "GET", "PUT")
+	// 3) Unprotected auth endpoints (handled by AuthController.Login for POST)
+	r.HandleFunc("/login", authController.Login).Methods("POST")
 
 	// 4) “all” subrouter requires a valid JWT
 	all := r.NewRoute().Subrouter()
 	all.Use(middlewares.AuthMiddleware(jwtSecret))
+
+	// 4) Protected auth endpoints (handled by AuthController.Login for GET/PUT)
+	all.HandleFunc("/login", authController.Login).Methods("GET", "PUT")
 
 	// 5) Non-admin resources (GET list with pagination/filters, GET by ID)
 	root := "/"
@@ -72,7 +75,7 @@ func SetupRouter(
 // @Param      resource   path     string  true   "Resource type"                                   Enums(example1, example2, exampleRelational)
 // @Param      id         path     string  false  "Resource ID (when fetching a single item)"
 // @Param      page       query    int     false  "Page number (default: 1)"                         default(1)
-// @Param      per_page   query    int     false  "Number of items per page (default: 10)"           default(10)
+// @Param      page_size   query    int     false  "Number of items per page (default: 10)"           default(10)
 // @Param      *          query    string  false  "Any other key=value acts as a filter (e.g., ?status=active). Multiple filters allowed."
 // @Produce    json
 // @Success    200  {object}  map[string]interface{}  "Returns { data: [...], meta: {...}, links: {...} }"
@@ -141,7 +144,7 @@ func setupURLResourceRoutes(
 // @Failure    400  {object}  models.ErrorResponse  "Invalid resource"
 // @Failure    403  {object}  models.ErrorResponse  "Forbidden: Admins only"
 // @Failure    500  {object}  models.ErrorResponse  "Internal server error"
-// @Router     /{resource}       [get]     // only applies if resource=user
+// @Router     /user       [get]     // only applies if resource=user
 // @Router     /{resource}/{id}  [delete]
 // @Security   ApiKeyAuth
 func setupURLAdminResourceRoutes(

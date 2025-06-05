@@ -41,7 +41,7 @@ type paginatedStatsResponse struct {
 
 type statsPagination struct {
 	CurrentPage int `json:"current_page"`
-	PerPage     int `json:"per_page"`
+	PerPage     int `json:"page_size"`
 	TotalItems  int `json:"total_items"`
 	TotalPages  int `json:"total_pages"`
 }
@@ -187,7 +187,7 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 	basePath := r.URL.Path
 	q := r.URL.Query()
 	q.Set("page", fmt.Sprintf("%d", currentPage))
-	q.Set("per_page", fmt.Sprintf("%d", perPage))
+	q.Set("page_size", fmt.Sprintf("%d", perPage))
 	selfURL := basePath + "?" + q.Encode()
 
 	// First and Last are the same since only one page exists
