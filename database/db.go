@@ -37,54 +37,77 @@ type BaseController struct {
 //
 // This function also performs automatic migrations for all registered models.
 func ConnectDB(cfg *utils.Config) {
-	dsn := cfg.DSN() // Generate the database connection string
+	dsn := cfg.DSN()
 
-	var db *gorm.DB
+	var (
+		db  *gorm.DB
+		err error
+	)
 
-	var err error
+	const (
+		maxRetries = 5
+		retryDelay = 5 * time.Second
+	)
 
-	seconds := 5
-
-	// Retry connection up to 5 times
-	for attempts := 1; attempts <= 5; attempts++ {
+	// --- 1) CONNECT WITH RETRIES ---
+	for attempt := 1; attempt <= maxRetries; attempt++ {
 		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 			SkipDefaultTransaction: true,
 			NamingStrategy: schema.NamingStrategy{
-				SingularTable: true, // <-- add this line
+				SingularTable: true,
 			},
 			Logger:  logger.Default.LogMode(logger.Silent),
 			NowFunc: time.Now,
 		})
 		if err == nil {
 			log.Println("Connected to MySQL successfully.")
-
 			break
 		}
 
-		const maxRetries = 5
-		if attempts == maxRetries {
-			log.Fatalf("Failed to connect to MySQL after %d attempts: %v", attempts, err)
+		if attempt == maxRetries {
+			log.Fatalf("Failed to connect after %d attempts: %v", attempt, err)
 		}
-
-		log.Printf("Failed to connect to MySQL, retrying in %d seconds... (Attempt %d/5)", seconds, attempts)
-		time.Sleep(time.Duration(seconds) * time.Second)
+		log.Printf("Connection failed, retrying in %v (attempt %d/%d)…", retryDelay, attempt, maxRetries)
+		time.Sleep(retryDelay)
 	}
 
-	// AutoMigrate all models
-	err = db.Debug().AutoMigrate(&models.Example1{}, &models.Example2{}, &models.User{})
-	if err != nil {
-		log.Fatalf("AutoMigrate failed: %v", err)
+	// --- 2) COLLECT MODELS FOR MIGRATION ---
+	regular := make([]interface{}, 0, len(models.ModelMap))
+	relational := make([]interface{}, 0, len(models.RelationalModelKeys))
+
+	// Build a quick lookup for relational keys
+	relKeys := map[string]struct{}{}
+	for _, k := range models.RelationalModelKeys {
+		relKeys[k] = struct{}{}
 	}
 
-	// AutoMigrate relational models separately
-	err = db.Debug().AutoMigrate(&models.ExampleRelational{})
-	if err != nil {
-		log.Fatalf("AutoMigrate failed: %v", err)
+	// Split ModelMap entries into regular vs relational
+	for name, mdl := range models.ModelMap {
+		if _, isRel := relKeys[name]; isRel {
+			relational = append(relational, mdl)
+		} else {
+			regular = append(regular, mdl)
+		}
 	}
 
-	// Assign the global database instance
+	// --- 3) MIGRATE REGULAR MODELS ---
+	if err := db.Debug().AutoMigrate(regular...); err != nil {
+		log.Fatalf("AutoMigrate (regular models) failed: %v", err)
+	}
+	log.Printf("AutoMigrate: %d regular models", len(regular))
+
+	// --- 4) MIGRATE RELATIONAL MODELS ---
+	if len(relational) > 0 {
+		if err := db.Debug().AutoMigrate(relational...); err != nil {
+			log.Fatalf("AutoMigrate (relational models) failed: %v", err)
+		}
+		log.Printf("AutoMigrate: %d relational models", len(relational))
+	}
+
+	// --- 5) ASSIGN GLOBAL INSTANCE ---
 	DB = db
 }
+
 
 // CreateOrUpdateRecord attempts to create a new record. If a duplicate key error
 // is encountered (and overwrite == true), it falls back to an update.

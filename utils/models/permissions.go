@@ -9,7 +9,8 @@ type Permissions struct {
 	Delete []string
 }
 
-// Existing “anonymous”, “User” (user), and “admin” slices remain, for backward compatibility.
+// Existing 3 roles anonymous, User, and admin
+// Edit this arrays to allow access to roles to endpoints
 var AnonymousGetResources = []string{}
 var AnonymousPostResources = []string{}
 var AnonymousPutResources = []string{}
@@ -29,7 +30,7 @@ var AdminPatchResources = []string{"user", "example1", "example2", "exampleRelat
 var AdminDeleteResources = []string{"user", "example1", "example2", "exampleRelational"}
 
 // RolePermissions ties a role‐name (string) to its Permissions.
-// Feel free to add/remove keys here, or change the slices at runtime.
+// Feel free to add/remove keys here.
 // The router will pick up any change automatically.
 var RolePermissions = map[string]Permissions{
 	"anonymous": {
@@ -53,12 +54,4 @@ var RolePermissions = map[string]Permissions{
 		Patch:  AdminPatchResources,
 		Delete: AdminDeleteResources,
 	},
-}
-
-// ModelMap (unchanged) still maps resource‐names to model pointers.
-var ModelMap = map[string]interface{}{
-	"user":              &User{},
-	"example1":          &Example1{},
-	"example2":          &Example2{},
-	"exampleRelational": &ExampleRelational{},
 }

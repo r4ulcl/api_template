@@ -1,5 +1,48 @@
 package models
 
+import (
+	"reflect"
+	"strings"
+)
+
+// RelationalModelKeys lists which ModelMap entries need their own AutoMigrate pass.
+// NormalModelKeys lists models to migrate in the first (non-relational) pass.
+var (
+	RelationalModelKeys []string
+	NormalModelKeys     []string
+)
+
+func init() {
+	// Automatically detect relational vs. normal tables by checking for gorm foreignKey tags
+	for name, model := range ModelMap {
+		t := reflect.TypeOf(model)
+		if t.Kind() == reflect.Ptr {
+			t = t.Elem()
+		}
+		hasFK := false
+		for i := 0; i < t.NumField(); i++ {
+			gormTag := t.Field(i).Tag.Get("gorm")
+			if strings.Contains(gormTag, "foreignKey:") {
+				hasFK = true
+				break
+			}
+		}
+		if hasFK {
+			RelationalModelKeys = append(RelationalModelKeys, name)
+		} else {
+			NormalModelKeys = append(NormalModelKeys, name)
+		}
+	}
+}
+
+// ModelMap maps resource‐names to model pointers. (Update this with all models)
+var ModelMap = map[string]interface{}{
+	"user":              &User{}, // Do not delete
+	"example1":          &Example1{},
+	"example2":          &Example2{},
+	"exampleRelational": &ExampleRelational{},
+}
+
 // Example1 represents a database table storing example data.
 //
 // This struct is mapped to a table where Field1 serves as the primary key.
