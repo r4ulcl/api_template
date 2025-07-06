@@ -34,22 +34,22 @@ A **Go REST API** with MySQL database support, featuring **dynamic API endpoints
 
    Edit `.env` and supply your values:
 
-     ```dotenv
-# MySQL Settings
-MYSQL_ROOT_PASSWORD=example
-MYSQL_DATABASE=demo_db
-MYSQL_USER=demo_user
-MYSQL_PASSWORD=demo_pass
+   ```dotenv
+   # MySQL Settings
+   MYSQL_ROOT_PASSWORD=example
+   MYSQL_DATABASE=demo_db
+   MYSQL_USER=demo_user
+   MYSQL_PASSWORD=demo_pass
 
-# App Settings
-DB_PORT=3306
-JWT_SECRET=your_jwt_secret_key
-ADMIN_PASSWORD=admin
+   # App Settings
+   DB_PORT=3306
+   JWT_SECRET=your_jwt_secret_key
+   ADMIN_PASSWORD=admin
 
-# Allow users to access stats for GUI
-USER_GUI=true
-SWAGGER=true
-     ```
+   # Allow users to access stats for GUI
+   USER_GUI=true
+   SWAGGER=true
+   ```
 
 4. **Update module path**
 
