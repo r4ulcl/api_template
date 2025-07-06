@@ -65,7 +65,7 @@ const docTemplate = `{
                 }
             },
             "put": {
-                "description": "Accepts JSON credentials (username + password) using PUT. Returns a JWT if valid.",
+                "description": "Accepts JWT using PUT. Returns a new JWT if valid.",
                 "consumes": [
                     "application/json"
                 ],
@@ -75,7 +75,7 @@ const docTemplate = `{
                 "tags": [
                     "auth"
                 ],
-                "summary": "Authenticate user via PUT",
+                "summary": "Renew token via PUT",
                 "responses": {
                     "200": {
                         "description": "JWT token returned",
@@ -141,6 +141,111 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized (invalid credentials)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/me": {
+            "get": {
+                "description": "GET returns the authenticated user's info; POST updates fields like email or password.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user",
+                    "auth"
+                ],
+                "summary": "Get or update current user's profile",
+                "responses": {
+                    "200": {
+                        "description": "User info returned or updated",
+                        "schema": {
+                            "$ref": "#/definitions/models.User"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input JSON",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized: missing or invalid token",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Allows the authenticated user to change email and/or password. To change password, both current and new passwords are required.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user",
+                    "auth"
+                ],
+                "summary": "Update current user's profile",
+                "parameters": [
+                    {
+                        "description": "Fields to update",
+                        "name": "update",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.UpdateUser"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated user info",
+                        "schema": {
+                            "$ref": "#/definitions/models.User"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request (invalid/missing fields)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized (invalid current password or token)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -536,6 +641,84 @@ const docTemplate = `{
                 },
                 "username": {
                     "description": "Username is the unique identifier for the user attempting to log in.",
+                    "type": "string"
+                }
+            }
+        },
+        "models.Role": {
+            "type": "string",
+            "enum": [
+                "admin",
+                "user"
+            ],
+            "x-enum-comments": {
+                "AdminRole": "@Enum admin",
+                "UserRole": "@Enum user"
+            },
+            "x-enum-varnames": [
+                "AdminRole",
+                "UserRole"
+            ]
+        },
+        "models.UpdateUser": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "description": "CreatedAt is the timestamp of when the user was created.",
+                    "type": "string"
+                },
+                "new_password": {
+                    "description": "new field",
+                    "type": "string",
+                    "example": "s3cr3tP@ss"
+                },
+                "password": {
+                    "description": "Password stores the hashed password for authentication.\nThe JSON tag omits this field in API responses for security reasons.",
+                    "type": "string"
+                },
+                "role": {
+                    "description": "Role defines the user's permissions, either \"admin\" or \"user\".",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.Role"
+                        }
+                    ]
+                },
+                "updated_at": {
+                    "description": "UpdatedAt is the timestamp of the last modification to the user record.",
+                    "type": "string"
+                },
+                "username": {
+                    "description": "Username is the unique identifier for the user.\nIt serves as the primary key in the database.",
+                    "type": "string"
+                }
+            }
+        },
+        "models.User": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "description": "CreatedAt is the timestamp of when the user was created.",
+                    "type": "string"
+                },
+                "password": {
+                    "description": "Password stores the hashed password for authentication.\nThe JSON tag omits this field in API responses for security reasons.",
+                    "type": "string"
+                },
+                "role": {
+                    "description": "Role defines the user's permissions, either \"admin\" or \"user\".",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.Role"
+                        }
+                    ]
+                },
+                "updated_at": {
+                    "description": "UpdatedAt is the timestamp of the last modification to the user record.",
+                    "type": "string"
+                },
+                "username": {
+                    "description": "Username is the unique identifier for the user.\nIt serves as the primary key in the database.",
                     "type": "string"
                 }
             }

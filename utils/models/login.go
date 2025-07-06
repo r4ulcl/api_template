@@ -34,3 +34,9 @@ type User struct {
 	// UpdatedAt is the timestamp of the last modification to the user record.
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// UpdateUserRequest represents the payload for updating a user, including an optional new password.
+type UpdateUser struct {
+	User               // embed all the User fields
+	NewPassword string `json:"new_password" example:"new_password"`
+}

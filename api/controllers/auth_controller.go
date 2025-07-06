@@ -94,8 +94,6 @@ func (ac *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		ac.handleLogin(w, r)
-	case http.MethodGet:
-		ac.handleGetUserInfo(w, r)
 	case http.MethodPut:
 		ac.handleRenewToken(w, r)
 	default:
@@ -199,8 +197,8 @@ func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(user)
 }
 
-// @Summary     Authenticate user via PUT
-// @Description Accepts JSON credentials (username + password) using PUT. Returns a JWT if valid.
+// @Summary     Renew token via PUT
+// @Description Accepts JWT using PUT. Returns a new JWT if valid.
 // @Tags        auth
 // @Accept      json
 // @Produce     json
@@ -245,7 +243,7 @@ func (ac *AuthController) handleRenewToken(w http.ResponseWriter, r *http.Reques
 // @Failure     401   {object} models.ErrorResponse    "Unauthorized: missing or invalid token"
 // @Failure     404   {object} models.ErrorResponse    "User not found"
 // @Failure     500   {object} models.ErrorResponse    "Internal server error"
-// @Router      /me [get,post]
+// @Router      /me [get]
 func (ac *AuthController) Me(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -266,7 +264,7 @@ func (ac *AuthController) Me(w http.ResponseWriter, r *http.Request) {
 // @Tags        user, auth
 // @Accept      json
 // @Produce     json
-// @Param       update body     object{password=string,new_password=string,email=string} true "Fields to update"
+// @Param       update body     models.UpdateUser true "Fields to update"
 // @Success     200    {object} models.User             "Updated user info"
 // @Failure     400    {object} models.ErrorResponse    "Bad request (invalid/missing fields)"
 // @Failure     401    {object} models.ErrorResponse    "Unauthorized (invalid current password or token)"
