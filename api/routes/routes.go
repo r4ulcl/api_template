@@ -1,4 +1,3 @@
-// routes/router.go
 package routes
 
 import (
@@ -121,6 +120,9 @@ func SetupRouter(
 	// Single subrouter with AuthMiddleware; RoleMiddleware is per-route.
 	authSub := r.NewRoute().Subrouter()
 	authSub.Use(middlewares.AuthMiddleware(jwtSecret))
+
+	// me HandleFunc
+	authSub.HandleFunc("/me", authController.Me).Methods("GET", "POST")
 
 	// Build: method → resource → []roles  (collecting all non-anonymous roles)
 	methodRoles := map[string]map[string][]string{

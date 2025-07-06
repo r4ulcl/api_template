@@ -170,10 +170,10 @@ To add a new resource (e.g. a `Product`):
 - [ ] User manage section, get info, change password, etc. Rol user too
    - [ ] Change password
    - [ ] Get user info
-- [ ] Bool in .env to swagger
+- [x] Bool in .env to swagger
 - [x] Paginate API
 - [x] Filters in GET
-- [ ] Allow insert array of JSON `[{}]`
+- [x] Allow insert array of JSON `[{}]`
 - [x] Allow sort `limit=20&page=3&sort=created_at:desc`
 - [x] Allow advanced filters
 
