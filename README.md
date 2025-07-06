@@ -1,157 +1,171 @@
-# **api_template**
+# api\_template
 
-A Golang API with MySQL database support, featuring **dynamic API endpoints** and **Swagger documentation**. The project is containerized using **Docker** and managed via **Docker Compose**, ensuring a streamlined development and deployment process.
-
----
-
-## **Features** 🌟
-
-✅ **Modular Code Structure** – Organized into controllers, models, middlewares, and utilities.  
-✅ **JWT Authentication** – Secure API with authentication and role-based access control.  
-✅ **Dynamic API** – Auto-generated CRUD endpoints for structured data models.  
-✅ **Swagger Documentation** – Auto-generated API docs for easy usage.  
-✅ **Dockerized Deployment** – Seamless setup with **Docker Compose**.  
-✅ **Persistent MySQL Database** – Ensures data remains intact across restarts.  
+A **Go REST API** with MySQL database support, featuring **dynamic API endpoints**, **role-based security**, **auto migrations**, and **Swagger documentation**. The project is containerized using **Docker** and orchestrated with **Docker Compose** for a seamless development and deployment workflow.
 
 ---
 
-## **Using as a Template** 🏗️
+## Features
 
-This project is designed to be a **boilerplate template** for Golang-based REST APIs. You can use it as a foundation for building your own API without starting from scratch.
+* **Dynamic endpoints** via reflection
+* **Role-based security** (JWT + middleware)
+* **Auto migrations** with GORM
+* **Swagger UI** ready to go
+* **Containerized** (Docker + Compose)
 
-### **How to Use it as a Template**
-1️⃣ **Click "Use this template"** on GitHub.  
-2️⃣ **Clone your new repository**:  
-   ```sh
+---
+
+## Quickstart
+
+1. **Create from Template**
+   On GitHub, click **Use this template** → **Create a new repository**.
+
+2. **Clone your new repo**
+
+   ```bash
    git clone https://github.com/yourusername/yourproject.git
    cd yourproject
    ```
-3️⃣ **Update Module Name** in `go.mod`:  
-   ```sh
-   module github.com/yourusername/yourproject
+
+3. **Configure environment**
+
+   ```bash
+   cp .env.example .env
    ```
-   Then, run:
-   ```sh
+
+   Edit `.env` and supply your values:
+
+     ```dotenv
+# MySQL Settings
+MYSQL_ROOT_PASSWORD=example
+MYSQL_DATABASE=demo_db
+MYSQL_USER=demo_user
+MYSQL_PASSWORD=demo_pass
+
+# App Settings
+DB_PORT=3306
+JWT_SECRET=your_jwt_secret_key
+ADMIN_PASSWORD=admin
+
+# Allow users to access stats for GUI
+USER_GUI=true
+SWAGGER=true
+     ```
+
+4. **Update module path**
+
+   ```bash
+   sed -i 's|module github.com/r4ulcl/api_template|module github.com/yourusername/yourproject|' go.mod
    go mod tidy
    ```
-4️⃣ **Modify Models & Controllers**  
-   - Add your own **data models** inside `models/`.
-   - Create **custom endpoints** in `controllers/`.
-   - Adjust **database migrations** in `database/`.
 
-5️⃣ **Run Your API** 🚀  
-   ```sh
+5. **Build & run**
+
+   ```bash
    docker-compose up --build
    ```
 
-🎉 **Your Golang API is now running!** Modify and expand it as needed.
-
---- 
-
-## **Getting Started** 🏁
-
-### **Prerequisites** 🛠️
-
-- **[Docker](https://www.docker.com/get-started)**
-- **[Docker Compose](https://docs.docker.com/compose/install/)**
-- **[Go 1.22+](https://go.dev/doc/install) (For local development, not needed with Docker)**
+   * API:  `http://localhost:8080`
+   * Swagger UI: `http://localhost:8080/swagger/index.html`
 
 ---
 
-## **Installation & Setup** ⚙️
-
-### **1. Clone the repository**
-```sh
-git clone https://github.com/r4ulcl/api_template.git
-cd api_template
-```
-
-### **2. Start the application using Docker**
-```sh
-docker-compose up --build
-```
-
-> This command will:
-> - Start a **MySQL database** container (`db`).
-> - Build and launch the **Go API application** (`app`).
-> - Expose the API on `http://localhost:8080`.
-
----
-
-## **Project Structure** 📂
+## Project Layout
 
 ```
 api_template/
-├── api/                        # Contains all API-related logic
-│   ├── controllers/            # Request handlers for API endpoints (business logic)
-│   ├── middlewares/            # Authentication, authorization, and other middleware
-│   └── routes/                 # Routing definitions that map endpoints to controllers
-├── database/                   # Database connection and query logic
-├── docs/                       # Swagger/OpenAPI files and other documentation
-├── utils/                      # Utility functions (e.g., hashing, JWT creation)
-│   └── models/                 # Data models and structs (e.g., User, Roles)
-├── main.go                     # Application entry point: runs the server
-├── Dockerfile                  # Instructions to containerize the application
-├── docker-compose.yml          # Docker Compose config for multi-service setups
-├── go.mod                      # Go module dependencies and module path
-└── go.sum                      # Dependency checksums for reproducible builds
+├── api/
+│   ├── controllers/
+│   │   ├── auth_controller.go   # Registration & login handlers
+│   │   └── base_controller.go   # Generic CRUD handlers
+│   ├── middlewares/
+│   │   └── auth_middleware.go   # JWT & RBAC middleware
+│   └── routes/
+│       └── routes.go            # Dynamic route registration
+├── database/
+│   └── database.go          # GORM connection, retries, auto-migrate
+├── utils/
+│   ├── config.go            # .env loader & DSN constructor
+│   ├── auth.go              # Password hashing & JWT utils
+│   └── models/              # GORM models & DTOs
+│       ├── api.go           # LoginRequest, RegisterRequest, JWTResponse, ErrorResponse
+│       ├── database.go      # Example1, Example2, ExampleRelational structs
+│       ├── login.go         # User model & Role enum
+│       └── permissions.go   # RolePermissions & ModelMap
+├── docs/
+│   ├── docs.go              # Swagger annotations
+│   ├── swagger.json         # Generated OpenAPI spec (JSON)
+│   └── swagger.yaml         # Generated OpenAPI spec (YAML)
+├── .env.example             # Sample environment variables
+├── Dockerfile               # Container build instructions
+├── docker-compose.yml       # Compose setup for DB + API
+├── main.go                  # Application entry point
+├── go.mod                   # Module path & dependencies
+└── go.sum                   # Dependency checksums
 ```
 
 ---
 
-## **Environment Variables** ⚙️
+## Adding Your Own Data Models
 
-The application requires some **environment variables** to be set. These are defined in `.env`.
+To add a new resource (e.g. a `Product`):
 
-| Variable      | Description                  | Default Value |
-|--------------|-------------------------------|--------------|
-| `DB_HOST`    | MySQL Database Host           | `db` |
-| `DB_PORT`    | MySQL Port                    | `3306` |
-| `DB_USER`    | MySQL Username                | `demo_user` |
-| `DB_PASSWORD` | MySQL Password               | `demo_pass` |
-| `DB_NAME`    | MySQL Database Name           | `demo_db` |
-| `JWT_SECRET` | JWT Secret Key for Tokens     | `your_jwt_secret_key` |
-| `ADMIN_PASSWORD` | Default Admin Password    | `SuperSecurePassword` |
+1. **Create the model** in `utils/models/product.go`
 
-> **⚠️ Important**: Modify these values in `.env` or set them manually before running the app.
+   ```go
+   package models
+
+   import "time"
+
+   // Product represents an item for sale.
+   type Product struct {
+     ID          uint      `gorm:"primaryKey" json:"id"`
+     Name        string    `gorm:"size:100;not null" json:"name"`
+     Description string    `gorm:"type:text" json:"description,omitempty"`
+     Price       float64   `gorm:"not null" json:"price"`
+     CreatedAt   time.Time `json:"created_at"`
+     UpdatedAt   time.Time `json:"updated_at"`
+   }
+   ```
+2. **Register resource & permissions**
+   In `utils/models/permissions.go`, add `"product"` to each appropriate permissions slice and to `ModelMap`:
+
+   ```diff
+   // permissions.go
+
+   var UserGetResources = []string{"example1", "example2", "exampleRelational", "product"}
+   // … likewise for AdminGetResources, AdminPostResources, etc.
+
+   var ModelMap = map[string]interface{}{
+     "user":              &User{},
+     "example1":          &Example1{},
+     "example2":          &Example2{},
+     "exampleRelational": &ExampleRelational{},
+   + "product":           &Product{},
+   }
+   ```
+
+4. **Rebuild & restart**
+
+   ```bash
+   docker-compose up --build
+   ```
+
+5. **Test the endpoints**
+
+   ```bash
+   # List products
+   curl -H "Authorization: Bearer <token>" http://localhost:8080/product
+
+   # Create product (admin only)
+   curl -X POST http://localhost:8080/product \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer <admin-token>" \
+        -d '{"name":"Gadget","price":19.99}'
+   ```
 
 ---
 
-## **API Documentation** 📖
-
-Swagger UI is available at:
-
-📌 **[http://localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html)**
-
-This provides a detailed overview of all endpoints, parameters, and responses.
-
----
-
-## **Usage** 🚀
-
-### **1. Login to Get JWT Token**
-```sh
-curl -X POST "http://localhost:8080/login" \
-     -H "Content-Type: application/json" \
-     -d '{"username": "testuser", "password": "password123"}'
-```
-_Response:_
-```json
-{
-  "token": "your.jwt.token"
-}
-```
-
-### **2. Access Protected Routes**
-Include the JWT token in the `Authorization` header:
-```sh
-curl -X GET "http://localhost:8080/xxxxxxx" \
-     -H "Authorization: Bearer your.jwt.token"
-```
-
----
-
-## **TODO**
+## Roadmap
 
 - [ ] User manage section, get info, change password, etc. Rol user too
    - [ ] Change password
@@ -165,16 +179,14 @@ curl -X GET "http://localhost:8080/xxxxxxx" \
 
 ---
 
-## **License** 📜
+## License
 
-🔓 **MIT License** – Feel free to use, modify, and distribute this project.
-
----
-
-## **Contributors** 🤝
-
-🚀 **Maintained by:** [r4ulcl](https://github.com/r4ulcl)
+Distributed under the **MIT License**. See `LICENSE` for details.
 
 ---
 
-💡 **Have suggestions or found an issue?** Open a pull request or file an issue in the repository!
+## Maintainer
+
+**r4ulcl** – [github.com/r4ulcl](https://github.com/r4ulcl)
+
+Have suggestions or found a bug? Please open an issue or submit a pull request!
