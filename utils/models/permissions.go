@@ -32,11 +32,11 @@ var UserGetResourcesOwn = []string{"example1", "exampleRelational"}
 var UserPostResources = []string{"example2"}
 var UserPostResourcesOwn = []string{"example1", "exampleRelational"}
 var UserPutResources = []string{}
-var UserPutResourcesOwn = []string{}
+var UserPutResourcesOwn = []string{"example1", "example2", "exampleRelational"}
 var UserPatchResources = []string{}
-var UserPatchResourcesOwn = []string{}
+var UserPatchResourcesOwn = []string{"example1", "example2", "exampleRelational"}
 var UserDeleteResources = []string{}
-var UserDeleteResourcesOwn = []string{}
+var UserDeleteResourcesOwn = []string{"example1", "example2", "exampleRelational"}
 
 var AdminGetResources = []string{"user", "example1", "example2", "exampleRelational"}
 var AdminGetResourcesOwn = []string{}

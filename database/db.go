@@ -201,13 +201,17 @@ func (bc *BaseController) GetAllRecords(model interface{}, filters map[string]in
 // - An error if the record is not found.
 func (bc *BaseController) GetRecordsByID(model interface{}, id string) error {
 	parts := strings.Split(id, "-")
-	primaryKeys := getPrimaryKeyFields(model)
-	if len(primaryKeys) != len(parts) {
+
+	pkCols, err := getDBPrimaryKeyColumns(bc.DB, model)
+	if err != nil {
+		return fmt.Errorf("failed to parse schema: %w", err)
+	}
+	if len(pkCols) != len(parts) {
 		return fmt.Errorf("mismatch between primary keys and tokenized ID")
 	}
 
-	pkMap := make(map[string]interface{}, len(primaryKeys))
-	for i, col := range primaryKeys {
+	pkMap := make(map[string]interface{}, len(pkCols))
+	for i, col := range pkCols {
 		pkMap[col] = parts[i]
 	}
 
@@ -235,30 +239,26 @@ func (bc *BaseController) GetRecordsByIDWithSensitive(model interface{}, id stri
 		return errors.New("model must be a non-nil pointer to a struct")
 	}
 
-	// Build PK map from "id" parts using struct field names detected as primary keys
 	parts := strings.Split(id, "-")
-	primaryKeys := getPrimaryKeyFields(model)
-	if len(primaryKeys) != len(parts) {
+	pkCols, err := getDBPrimaryKeyColumns(bc.DB, model)
+	if err != nil {
+		return fmt.Errorf("failed to parse schema: %w", err)
+	}
+	if len(pkCols) != len(parts) {
 		return fmt.Errorf("mismatch between primary keys and tokenized ID")
 	}
-	pkMap := make(map[string]interface{}, len(primaryKeys))
-	for i, col := range primaryKeys {
+
+	pkMap := make(map[string]interface{}, len(pkCols))
+	for i, col := range pkCols {
 		pkMap[col] = parts[i]
 	}
 
-	// Prepare a new session and preload any relation fields that declare a foreignKey
-	tx := bc.DB.Session(&gorm.Session{NewDB: true})
-	tx = tx.Select("*") // ensure all columns are selected
+	tx := bc.DB.Session(&gorm.Session{NewDB: true}).Select("*")
 
-	// Detect relations by gorm tag and preload them
 	modelType := reflect.TypeOf(model)
 	if modelType.Kind() == reflect.Ptr {
 		modelType = modelType.Elem()
 	}
-	if modelType.Kind() != reflect.Struct {
-		return errors.New("model must point to a struct")
-	}
-
 	for i := 0; i < modelType.NumField(); i++ {
 		field := modelType.Field(i)
 		if gTag, ok := field.Tag.Lookup("gorm"); ok && strings.Contains(gTag, "foreignKey:") {
@@ -266,7 +266,6 @@ func (bc *BaseController) GetRecordsByIDWithSensitive(model interface{}, id stri
 		}
 	}
 
-	// Fetch the record
 	if err := tx.First(model, pkMap).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("record not found")
@@ -285,17 +284,20 @@ func (bc *BaseController) GetRecordsByIDWithSensitive(model interface{}, id stri
 // Returns:
 // - An error if the record is not found or update fails.
 func (bc *BaseController) UpdateRecords(model interface{}, id string) error {
-	// 1) Figure out primaryKeys[] and keyValues[] exactly as you did.
-
 	var primaryKeys []string
 	var keyValues []string
 
 	if id != "" {
 		parts := strings.Split(id, "-")
-		primaryKeys = getJSONPrimaryKeys(model)
-		if len(primaryKeys) != len(parts) {
+
+		dbPKCols, err := getDBPrimaryKeyColumns(bc.DB, model)
+		if err != nil {
+			return fmt.Errorf("failed to parse schema: %w", err)
+		}
+		if len(dbPKCols) != len(parts) {
 			return fmt.Errorf("mismatch between number of primary keys and ID parts")
 		}
+		primaryKeys = dbPKCols
 		keyValues = parts
 	} else {
 		// extract PKs from model itself
@@ -304,26 +306,28 @@ func (bc *BaseController) UpdateRecords(model interface{}, id string) error {
 		if err != nil {
 			return fmt.Errorf("failed to get primary key values from model: %w", err)
 		}
-		primaryKeys = getJSONPrimaryKeys(model)
-		if len(primaryKeys) == 0 {
+		// map struct field PKs to DB column names
+		dbPKCols, err := getDBPrimaryKeyColumns(bc.DB, model)
+		if err != nil {
+			return fmt.Errorf("failed to parse schema: %w", err)
+		}
+		if len(dbPKCols) == 0 {
 			return errors.New("no primary keys found in the model")
 		}
+		primaryKeys = dbPKCols
 	}
 
-	// 2) Build the query to target just that record
 	tx := bc.DB.Model(model)
-	for i, pk := range primaryKeys {
-		tx = tx.Where(pk+" = ?", keyValues[i])
+	for i, col := range primaryKeys {
+		tx = tx.Where(col+" = ?", keyValues[i])
 	}
 
-	// 3) Call Updates(model) *directly* (GORM will only set the non-zero fields)
 	if err := tx.Updates(model).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("record not found")
 		}
 		return err
 	}
-
 	return nil
 }
 
@@ -336,66 +340,28 @@ func (bc *BaseController) UpdateRecords(model interface{}, id string) error {
 // Returns:
 // - An error if deletion fails.
 func (bc *BaseController) DeleteRecords(model interface{}, id string) error {
-	tx := bc.DB.Debug().
-		Session(&gorm.Session{NewDB: true}).
-		Model(model)
-
-	// Split the incoming ID by "-" for potential composite keys.
 	parts := strings.Split(id, "-")
 
-	// Get all JSON field names where GORM tag includes "primaryKey".
-	primaryKeys := getJSONPrimaryKeys(model)
-
-	if len(primaryKeys) != len(parts) {
-		return fmt.Errorf("mismatch between primary keys (%d) and tokenized ID parts (%d)",
-			len(primaryKeys), len(parts))
+	pkCols, err := getDBPrimaryKeyColumns(bc.DB, model)
+	if err != nil {
+		return fmt.Errorf("failed to parse schema: %w", err)
+	}
+	if len(pkCols) != len(parts) {
+		return fmt.Errorf("mismatch between primary keys (%d) and tokenized ID parts (%d)", len(pkCols), len(parts))
 	}
 
-	// Reflect on the `model` pointer to reach its underlying struct fields.
-	val := reflect.ValueOf(model)
-	if val.Kind() != reflect.Ptr || val.IsNil() {
-		return errors.New("model must be a non-nil pointer to a struct")
+	tx := bc.DB.Debug().Session(&gorm.Session{NewDB: true}).Model(model)
+	for i, col := range pkCols {
+		tx = tx.Where(col+" = ?", parts[i])
 	}
 
-	elem := val.Elem()
-	if elem.Kind() != reflect.Struct {
-		return errors.New("model must point to a struct")
-	}
-
-	// We'll iterate through fields in the struct in the same order as `getJSONPrimaryKeys`.
-	// Each time we find a primaryKey field, we assign the corresponding `parts[i]`.
-	pkCount := 0
-
-	for i := range elem.NumField() {
-		fieldType := elem.Type().Field(i)
-
-		gormTag := fieldType.Tag.Get("gorm")
-		if strings.Contains(gormTag, "primaryKey") {
-			// This field is a primary key. We set its value to parts[pkCount].
-			// NOTE: If your PK is an integer, parse parts[pkCount] accordingly.
-			fieldValue := elem.Field(i)
-			if !fieldValue.CanSet() {
-				return fmt.Errorf("cannot set value for field %s", fieldType.Name)
-			}
-			// For simplicity, assume string primary keys. Adjust if numeric.
-			fieldValue.SetString(parts[pkCount])
-
-			pkCount++
-		}
-	}
-
-	// Now that the primary key fields are updated to match `id`,
-	// GORM will generate a delete statement like:
-	//    DELETE FROM `example1` WHERE `example1`.`field1` = 'id'
 	res := tx.Delete(model)
 	if res.Error != nil {
 		return res.Error
 	}
-
 	if res.RowsAffected == 0 {
 		return fmt.Errorf("no records deleted for ID %s", id)
 	}
-
 	return nil
 }
 
@@ -455,4 +421,17 @@ func getPrimaryKeyValues(model interface{}) ([]string, error) {
 	}
 
 	return values, nil
+}
+
+// helpers: use GORM schema to get PK db column names in correct order
+func getDBPrimaryKeyColumns(db *gorm.DB, model interface{}) ([]string, error) {
+	stmt := &gorm.Statement{DB: db}
+	if err := stmt.Parse(model); err != nil {
+		return nil, err
+	}
+	cols := make([]string, 0, len(stmt.Schema.PrimaryFields))
+	for _, f := range stmt.Schema.PrimaryFields {
+		cols = append(cols, f.DBName) // real db column name
+	}
+	return cols, nil
 }

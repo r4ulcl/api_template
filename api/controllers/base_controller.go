@@ -121,6 +121,23 @@ func getCreatedBy(model interface{}) (string, bool) {
 	return "", false
 }
 
+// hasOwnership checks CreatedBy on a loaded instance.
+func hasOwnership(model interface{}, userID string) bool {
+	if createdBy, ok := getCreatedBy(model); ok && createdBy == userID {
+		return true
+	}
+	return false
+}
+
+// ownsByID loads the record by ID and returns true only if CreatedBy matches userID.
+func ownsByID(c *Controller, model interface{}, tokenizedID string, userID string) bool {
+	temp := reflect.New(reflect.TypeOf(model).Elem()).Interface()
+	if err := c.BC.GetRecordsByID(temp, tokenizedID); err != nil {
+		return false
+	}
+	return hasOwnership(temp, userID)
+}
+
 // ------------------------------------------------------------------
 // Create (supports single object OR array of objects)
 // ------------------------------------------------------------------
@@ -141,9 +158,9 @@ func getCreatedBy(model interface{}) (string, bool) {
 // @Failure     500        {object}  models.ErrorResponse "Internal server error"
 // @Router      /{resource} [post]
 func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interface{}, overwrite bool) {
-	w.Header().Set("Condent-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json")
 
-	ownOnly, userID := ownOnlyAndUserID(r)
+	_, userID := ownOnlyAndUserID(r)
 
 	// 1) Read raw body to detect if it's an array or single object
 	var buf bytes.Buffer
@@ -186,15 +203,22 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 			return
 		}
 
-		// Set audit fields and enforce ownership if ownOnly
+		// Set audit fields and enforce ownership
 		slice := slicePtr.Elem()
 		for i := 0; i < slice.Len(); i++ {
 			elem := slice.Index(i)
 			if elem.CanAddr() {
 				setAuditOnCreate(elem.Addr().Interface(), userID)
 			}
-			if ownOnly && elem.CanAddr() {
-				// ownership is CreatedBy which setAuditOnCreate already sets
+			// Always force CreatedBy to current user so clients cannot spoof ownership
+			if elem.CanAddr() {
+				ev := elem
+				if ev.Kind() == reflect.Ptr {
+					ev = ev.Elem()
+				}
+				if f := ev.FieldByName("CreatedBy"); f.IsValid() && f.CanSet() && f.Kind() == reflect.String {
+					f.SetString(userID)
+				}
 			}
 		}
 
@@ -226,6 +250,18 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 
 	// Set audit fields and enforce ownership if ownOnly
 	setAuditOnCreate(model, userID)
+	// Force CreatedBy to current user for safety
+	if v := reflect.ValueOf(model); v.IsValid() {
+		ev := v
+		if ev.Kind() == reflect.Ptr {
+			ev = ev.Elem()
+		}
+		if ev.IsValid() {
+			if f := ev.FieldByName("CreatedBy"); f.IsValid() && f.CanSet() && f.Kind() == reflect.String {
+				f.SetString(userID)
+			}
+		}
+	}
 
 	// Create or update according to flag
 	if err := c.BC.CreateOrUpdateRecord(model, overwrite); err != nil {
@@ -244,7 +280,7 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 }
 
 // ------------------------------------------------------------------
-// GetAll (supports advanced filters + sort + pagination)
+// GetAll (supports advanced filters and sort and pagination)
 // ------------------------------------------------------------------
 
 // paginatedResponse is the shape of our JSON response when returning a paginated list.
@@ -308,7 +344,7 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 		perPage = pp
 	}
 
-	// 2) Prepare base GORM instance and apply filters/sort
+	// 2) Prepare base GORM instance and apply filters and sort
 	baseModel := c.BC.DB.Model(model)
 
 	// Ownership scope for list
@@ -531,13 +567,10 @@ func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model inter
 	}
 
 	// If ownOnly, verify ownership using CreatedBy
-	if ownOnly {
-		if createdBy, ok := getCreatedBy(model); !ok || createdBy != userID {
-			// Act as not found to avoid leaking information
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "record not found"})
-			return
-		}
+	if ownOnly && !hasOwnership(model, userID) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "record not found"})
+		return
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -571,24 +604,10 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 	ownOnly, userID := ownOnlyAndUserID(r)
 
 	// If ownOnly, verify ownership before applying update
-	if ownOnly {
-		// Load existing record by ID
-		temp := reflect.New(reflect.TypeOf(model).Elem()).Interface()
-		if err := c.BC.GetRecordsByID(temp, tokenizedID); err != nil {
-			if strings.Contains(err.Error(), "record not found") {
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
-				return
-			}
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
-			return
-		}
-		if createdBy, ok := getCreatedBy(temp); !ok || createdBy != userID {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "record not found"})
-			return
-		}
+	if ownOnly && !ownsByID(c, model, tokenizedID, userID) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "record not found"})
+		return
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(model); err != nil {
@@ -640,23 +659,10 @@ func (c *Controller) Delete(w http.ResponseWriter, r *http.Request, model interf
 	ownOnly, userID := ownOnlyAndUserID(r)
 
 	// If ownOnly, verify ownership before deletion
-	if ownOnly {
-		temp := reflect.New(reflect.TypeOf(model).Elem()).Interface()
-		if err := c.BC.GetRecordsByID(temp, tokenizedID); err != nil {
-			if strings.Contains(err.Error(), "no records deleted") || strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "record not found") {
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
-				return
-			}
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
-			return
-		}
-		if createdBy, ok := getCreatedBy(temp); !ok || createdBy != userID {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "record not found"})
-			return
-		}
+	if ownOnly && !ownsByID(c, model, tokenizedID, userID) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "record not found"})
+		return
 	}
 
 	if err := c.BC.DeleteRecords(model, tokenizedID); err != nil {

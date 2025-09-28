@@ -11,32 +11,39 @@ import (
 	"gorm.io/gorm"
 )
 
-// TableStats holds detailed statistics for a single table, including its PK columns.
+// TableStats holds a compact view for non admin users.
 type TableStats struct {
-	TableName      string     `json:"table_name"`
-	ExactRowCount  int64      `json:"exact_row_count"`       // exact COUNT(*) at the time of the request
-	DataSize       uint64     `json:"data_size_bytes"`       // DATA_LENGTH
-	IndexSize      uint64     `json:"index_size_bytes"`      // INDEX_LENGTH
-	DataFree       uint64     `json:"data_free_bytes"`       // DATA_FREE
-	MaxDataLength  uint64     `json:"max_data_length_bytes"` // MAX_DATA_LENGTH
-	AutoIncrement  uint64     `json:"auto_increment"`        // AUTO_INCREMENT
-	Engine         string     `json:"engine"`                // storage engine (InnoDB, MyISAM, etc.)
-	TableCollation string     `json:"table_collation"`       // TABLE_COLLATION
-	RowFormat      string     `json:"row_format"`            // ROW_FORMAT
-	TableType      string     `json:"table_type"`            // BASE TABLE, VIEW, etc.
-	TableComment   string     `json:"table_comment"`         // any comment on the table
-	CreateTime     *time.Time `json:"create_time,omitempty"` // CREATE_TIME (can be null)
-	UpdateTime     *time.Time `json:"update_time,omitempty"` // UPDATE_TIME (can be null)
-	CheckTime      *time.Time `json:"check_time,omitempty"`  // CHECK_TIME (can be null)
-	ColumnCount    uint64     `json:"column_count"`          // number of columns in the table
-	IndexCount     uint64     `json:"index_count"`           // number of distinct indexes on that table
-	TotalSize      uint64     `json:"total_size_bytes"`      // DataSize + IndexSize
-	PrimaryKey     string     `json:"primary_key"`           // comma-separated list of PK column(s)
+	TableName     string `json:"table_name"`
+	ExactRowCount int64  `json:"exact_row_count"`
+	PrimaryKey    string `json:"primary_key"`
 }
 
-// paginatedStatsResponse wraps the stats slice in the new JSON format.
+// TableStatsAdmin is the detailed view for admins.
+type TableStatsAdmin struct {
+	TableName      string     `json:"table_name"`
+	ExactRowCount  int64      `json:"exact_row_count"`
+	DataSize       uint64     `json:"data_size_bytes"`
+	IndexSize      uint64     `json:"index_size_bytes"`
+	DataFree       uint64     `json:"data_free_bytes"`
+	MaxDataLength  uint64     `json:"max_data_length_bytes"`
+	AutoIncrement  uint64     `json:"auto_increment"`
+	Engine         string     `json:"engine"`
+	TableCollation string     `json:"table_collation"`
+	RowFormat      string     `json:"row_format"`
+	TableType      string     `json:"table_type"`
+	TableComment   string     `json:"table_comment"`
+	CreateTime     *time.Time `json:"create_time,omitempty"`
+	UpdateTime     *time.Time `json:"update_time,omitempty"`
+	CheckTime      *time.Time `json:"check_time,omitempty"`
+	ColumnCount    uint64     `json:"column_count"`
+	IndexCount     uint64     `json:"index_count"`
+	TotalSize      uint64     `json:"total_size_bytes"`
+	PrimaryKey     string     `json:"primary_key"`
+}
+
+// paginatedStatsResponse wraps the stats slice.
 type paginatedStatsResponse struct {
-	Data  []TableStats    `json:"data"`
+	Data  interface{}     `json:"data"`
 	Meta  statsPagination `json:"meta"`
 	Links statsLinks      `json:"links"`
 }
@@ -56,39 +63,24 @@ type statsLinks struct {
 	Last  string `json:"last"`
 }
 
-// GetDBStats retrieves, for each table in the current schema:
-//   - exact row count (via SELECT COUNT(*))
-//   - DATA_LENGTH, INDEX_LENGTH, DATA_FREE, MAX_DATA_LENGTH, AUTO_INCREMENT
-//   - ENGINE, TABLE_COLLATION, ROW_FORMAT, TABLE_TYPE, TABLE_COMMENT
-//   - CREATE_TIME, UPDATE_TIME, CHECK_TIME
-//   - column_count (number of columns in that table)
-//   - index_count (number of distinct indexes on that table)
-//   - primary_key (all PK columns comma‐separated)
-//   - total_size_bytes (data + index size)
-//
-// Returns a paginated JSON response with “data”, “meta”, and “links”. On any error,
-// it responds with HTTP 500 + ErrorResponse.
 func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Role and user ID from context
 	roleVal := r.Context().Value(middlewares.ContextRole)
 	role, _ := roleVal.(string)
 	uidVal := r.Context().Value(middlewares.ContextUserID)
 	userID, _ := uidVal.(string)
 
-	// Resolve which resources this role can access, and how
 	perms, ok := models.RolePermissions[role]
 	if !ok {
-		// Unknown role → no access to any table
-		writeStats(w, r, nil)
+		// Unknown role means no access
+		writeStats(w, r, []TableStats{})
 		return
 	}
 
-	// Build a map of tableName → accessMode ("full" or "own")
+	// Map: table name -> access mode ("full" or "own")
 	accessByTable := map[string]string{}
 
-	// Helper to get GORM table name for a model pointer
 	getTableName := func(db *gorm.DB, model interface{}) (string, error) {
 		stmt := &gorm.Statement{DB: db}
 		if err := stmt.Parse(model); err != nil {
@@ -97,41 +89,30 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		return stmt.Schema.Table, nil
 	}
 
-	// First, mark own access
 	for _, res := range perms.GetOwn {
-		modelPtr, exists := models.ModelMap[res]
-		if !exists {
-			continue
+		if modelPtr, exists := models.ModelMap[res]; exists {
+			if tbl, err := getTableName(c.BC.DB, modelPtr); err == nil {
+				if accessByTable[tbl] == "" {
+					accessByTable[tbl] = "own"
+				}
+			}
 		}
-		if tbl, err := getTableName(c.BC.DB, modelPtr); err == nil {
-			// Only set to own if not already full
-			if accessByTable[tbl] == "" {
-				accessByTable[tbl] = "own"
+	}
+	for _, res := range perms.Get {
+		if modelPtr, exists := models.ModelMap[res]; exists {
+			if tbl, err := getTableName(c.BC.DB, modelPtr); err == nil {
+				accessByTable[tbl] = "full"
 			}
 		}
 	}
 
-	// Then, upgrade to full where applicable
-	for _, res := range perms.Get {
-		modelPtr, exists := models.ModelMap[res]
-		if !exists {
-			continue
-		}
-		if tbl, err := getTableName(c.BC.DB, modelPtr); err == nil {
-			accessByTable[tbl] = "full"
-		}
-	}
-
-	// If no allowed tables, respond with empty data
 	if len(accessByTable) == 0 {
-		writeStats(w, r, nil)
+		writeStats(w, r, []TableStats{})
 		return
 	}
 
-	// Current schema
 	dbName := c.BC.DB.Migrator().CurrentDatabase()
 
-	// Raw row for information_schema details
 	type rawStat struct {
 		TableName      string     `gorm:"column:TABLE_NAME"`
 		DataLength     uint64     `gorm:"column:DATA_LENGTH"`
@@ -149,13 +130,12 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		CheckTime      *time.Time `gorm:"column:CHECK_TIME"`
 		ColumnCount    uint64     `gorm:"column:COLUMN_COUNT"`
 		IndexCount     uint64     `gorm:"column:INDEX_COUNT"`
-		PKColumns      string     `gorm:"column:PRIMARY_KEY"` // comma‐separated PK names
+		PKColumns      string     `gorm:"column:PRIMARY_KEY"`
 	}
 
-	// Collect the allowed table names to pass into the IN clause
-	allowedTables := make([]string, 0, len(accessByTable))
+	allowed := make([]string, 0, len(accessByTable))
 	for tbl := range accessByTable {
-		allowedTables = append(allowedTables, tbl)
+		allowed = append(allowed, tbl)
 	}
 
 	var rawStats []rawStat
@@ -163,16 +143,16 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		Raw(`
 			SELECT
 				t.TABLE_NAME,
-				IFNULL(t.DATA_LENGTH, 0)          AS DATA_LENGTH,
-				IFNULL(t.INDEX_LENGTH, 0)         AS INDEX_LENGTH,
-				IFNULL(t.DATA_FREE, 0)            AS DATA_FREE,
-				IFNULL(t.MAX_DATA_LENGTH, 0)      AS MAX_DATA_LENGTH,
-				IFNULL(t.AUTO_INCREMENT, 0)       AS AUTO_INCREMENT,
-				IFNULL(t.ENGINE, '')              AS ENGINE,
-				IFNULL(t.TABLE_COLLATION, '')     AS TABLE_COLLATION,
-				IFNULL(t.ROW_FORMAT, '')          AS ROW_FORMAT,
-				IFNULL(t.TABLE_TYPE, '')          AS TABLE_TYPE,
-				IFNULL(t.TABLE_COMMENT, '')       AS TABLE_COMMENT,
+				IFNULL(t.DATA_LENGTH, 0)      AS DATA_LENGTH,
+				IFNULL(t.INDEX_LENGTH, 0)     AS INDEX_LENGTH,
+				IFNULL(t.DATA_FREE, 0)        AS DATA_FREE,
+				IFNULL(t.MAX_DATA_LENGTH, 0)  AS MAX_DATA_LENGTH,
+				IFNULL(t.AUTO_INCREMENT, 0)   AS AUTO_INCREMENT,
+				IFNULL(t.ENGINE, '')          AS ENGINE,
+				IFNULL(t.TABLE_COLLATION, '') AS TABLE_COLLATION,
+				IFNULL(t.ROW_FORMAT, '')      AS ROW_FORMAT,
+				IFNULL(t.TABLE_TYPE, '')      AS TABLE_TYPE,
+				IFNULL(t.TABLE_COMMENT, '')   AS TABLE_COMMENT,
 				t.CREATE_TIME,
 				t.UPDATE_TIME,
 				t.CHECK_TIME,
@@ -201,9 +181,8 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 			FROM information_schema.tables t
 			WHERE t.table_schema = ?
 			  AND t.table_name IN (?)
-		`, dbName, allowedTables).
-		Scan(&rawStats).
-		Error
+		`, dbName, allowed).
+		Scan(&rawStats).Error
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -211,62 +190,99 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For each row, compute exact count with access mode
+	// Decide the shape based on the user role
+	isAdmin := role == "admin"
+
+	if isAdmin {
+		stats := make([]TableStatsAdmin, 0, len(rawStats))
+		for _, rs := range rawStats {
+			mode := accessByTable[rs.TableName]
+			var exactCount int64
+
+			if mode == "own" {
+				q := fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE `created_by` = ?", rs.TableName)
+				if err := c.BC.DB.Raw(q, userID).Scan(&exactCount).Error; err != nil {
+					exactCount = -1
+				}
+			} else {
+				q := fmt.Sprintf("SELECT COUNT(*) FROM `%s`", rs.TableName)
+				if err := c.BC.DB.Raw(q).Scan(&exactCount).Error; err != nil {
+					exactCount = -1
+				}
+			}
+
+			stats = append(stats, TableStatsAdmin{
+				TableName:      rs.TableName,
+				ExactRowCount:  exactCount,
+				DataSize:       rs.DataLength,
+				IndexSize:      rs.IndexLength,
+				DataFree:       rs.DataFree,
+				MaxDataLength:  rs.MaxDataLength,
+				AutoIncrement:  rs.AutoIncrement,
+				Engine:         rs.Engine,
+				TableCollation: rs.TableCollation,
+				RowFormat:      rs.RowFormat,
+				TableType:      rs.TableType,
+				TableComment:   rs.TableComment,
+				CreateTime:     rs.CreateTime,
+				UpdateTime:     rs.UpdateTime,
+				CheckTime:      rs.CheckTime,
+				ColumnCount:    rs.ColumnCount,
+				IndexCount:     rs.IndexCount,
+				TotalSize:      rs.DataLength + rs.IndexLength,
+				PrimaryKey:     rs.PKColumns,
+			})
+		}
+		writeStats(w, r, stats)
+		return
+	}
+
+	// Non admin payload
 	stats := make([]TableStats, 0, len(rawStats))
 	for _, rs := range rawStats {
 		mode := accessByTable[rs.TableName]
 		var exactCount int64
 
 		if mode == "own" {
-			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE `created_by` = ?", rs.TableName)
-			if err := c.BC.DB.Raw(countQuery, userID).Scan(&exactCount).Error; err != nil {
+			q := fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE `created_by` = ?", rs.TableName)
+			if err := c.BC.DB.Raw(q, userID).Scan(&exactCount).Error; err != nil {
 				exactCount = -1
 			}
 		} else {
-			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`", rs.TableName)
-			if err := c.BC.DB.Raw(countQuery).Scan(&exactCount).Error; err != nil {
+			q := fmt.Sprintf("SELECT COUNT(*) FROM `%s`", rs.TableName)
+			if err := c.BC.DB.Raw(q).Scan(&exactCount).Error; err != nil {
 				exactCount = -1
 			}
 		}
 
 		stats = append(stats, TableStats{
-			TableName:      rs.TableName,
-			ExactRowCount:  exactCount,
-			DataSize:       rs.DataLength,
-			IndexSize:      rs.IndexLength,
-			DataFree:       rs.DataFree,
-			MaxDataLength:  rs.MaxDataLength,
-			AutoIncrement:  rs.AutoIncrement,
-			Engine:         rs.Engine,
-			TableCollation: rs.TableCollation,
-			RowFormat:      rs.RowFormat,
-			TableType:      rs.TableType,
-			TableComment:   rs.TableComment,
-			CreateTime:     rs.CreateTime,
-			UpdateTime:     rs.UpdateTime,
-			CheckTime:      rs.CheckTime,
-			ColumnCount:    rs.ColumnCount,
-			IndexCount:     rs.IndexCount,
-			TotalSize:      rs.DataLength + rs.IndexLength,
-			PrimaryKey:     rs.PKColumns,
+			TableName:     rs.TableName,
+			ExactRowCount: exactCount,
+			PrimaryKey:    rs.PKColumns,
 		})
 	}
 
-	// Respond with one page containing only the permitted tables
 	writeStats(w, r, stats)
 }
 
-// writeStats builds the pagination envelope and writes the response.
-func writeStats(w http.ResponseWriter, r *http.Request, stats []TableStats) {
+// writeStats paginates and writes any slice as data.
+func writeStats(w http.ResponseWriter, r *http.Request, data interface{}) {
+	// Determine total items from the slice length
 	totalItems := 0
-	if stats != nil {
-		totalItems = len(stats)
+	switch v := data.(type) {
+	case []TableStats:
+		totalItems = len(v)
+	case []TableStatsAdmin:
+		totalItems = len(v)
+	case nil:
+		totalItems = 0
+	default:
+		// Fallback when an unexpected type is passed
+		totalItems = 0
 	}
+
 	currentPage := 1
 	perPage := totalItems
-	if perPage == 0 {
-		perPage = 0
-	}
 	totalPages := 1
 
 	basePath := r.URL.Path
@@ -276,7 +292,7 @@ func writeStats(w http.ResponseWriter, r *http.Request, stats []TableStats) {
 	selfURL := basePath + "?" + q.Encode()
 
 	resp := paginatedStatsResponse{
-		Data: stats,
+		Data: data,
 		Meta: statsPagination{
 			CurrentPage: currentPage,
 			PerPage:     perPage,

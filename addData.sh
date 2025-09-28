@@ -155,8 +155,8 @@ ADMIN_AUTH="Authorization: Bearer $ADMIN_JWT"
 # Create users
 USER_A="alice"
 USER_B="bob"
-PASS_A="passalice"
-PASS_B="passbob"
+PASS_A="alice"
+PASS_B="bob"
 echo "Creating users $USER_A and $USER_B"
 create_user "$ADMIN_AUTH" "$USER_A" "$PASS_A" "alice@example.com" || true
 create_user "$ADMIN_AUTH" "$USER_B" "$PASS_B" "bob@example.com" || true
