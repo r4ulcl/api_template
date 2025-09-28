@@ -13,66 +13,87 @@ import (
 )
 
 // -----------------------------------------------------------------------------
-// Helper: register one CRUD route (list, by-ID, create, update, …)
+// Helper: register one CRUD route (list, by-ID, create, update, delete) with Own support
+// Now also aware of /user so POST and PUT use AuthController.Register
 // -----------------------------------------------------------------------------
 func registerCRUD(
 	router *mux.Router,
-	controller *controllers.Controller,
+	baseController *controllers.Controller,
+	authController *controllers.AuthController,
 	verb string, // "GET", "POST", "PUT", "PATCH", "DELETE"
 	resource string, // e.g. "example1"
-	modelType interface{},
-	roles []string, // nil|empty ⇒ no RoleMiddleware
+	modelType interface{}, // pointer to model
+	fullRoles []string, // roles with full access
+	ownRoles []string, // roles limited to own data
 	overwrite bool, // only used for PUT
 ) {
-	base := "/" + resource // collection endpoint
-	item := base + "/{id}" // single-item endpoint
+	base := "/" + resource
+	item := base + "/{id}"
+
 	wrap := func(h http.Handler) http.Handler {
-		if len(roles) == 0 {
+		if len(fullRoles) == 0 && len(ownRoles) == 0 {
 			return h
 		}
-		return middlewares.RoleMiddleware(roles...)(h)
+		return middlewares.OwnScopeMiddleware(fullRoles, ownRoles)(h)
 	}
 
 	switch verb {
-	// ---------- GET (list + by-ID) ----------
 	case "GET":
+		// Normalize types once
+		mt := reflect.TypeOf(modelType) // maybe *T or T
+		elem := mt
+		if mt.Kind() == reflect.Ptr {
+			elem = mt.Elem() // T
+		}
+
 		list := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			slicePtr := reflect.New(reflect.SliceOf(reflect.TypeOf(modelType).Elem())).Interface()
-			controller.GetAll(w, r, slicePtr)
+			// *([]T)
+			slicePtr := reflect.New(reflect.SliceOf(elem)).Interface()
+			baseController.GetAll(w, r, slicePtr)
 		})
+
 		byID := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			instancePtr := reflect.New(reflect.TypeOf(modelType)).Interface()
-			controller.GetByID(w, r, instancePtr)
+			// *T (never **T)
+			instancePtr := reflect.New(elem).Interface()
+			baseController.GetByID(w, r, instancePtr)
 		})
 
 		router.Handle(base, wrap(list)).Methods("GET")
 		router.Handle(item, wrap(byID)).Methods("GET")
 
-	// ---------- POST (collection) ----------
 	case "POST":
-		create := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			controller.Create(w, r, modelType, false)
-		})
-		router.Handle(base, wrap(create)).Methods("POST")
+		var h http.HandlerFunc
+		if resource == "user" && authController != nil {
+			// Creation of users goes through Register
+			h = authController.Register
+		} else {
+			h = func(w http.ResponseWriter, r *http.Request) {
+				baseController.Create(w, r, modelType, false)
+			}
+		}
+		router.Handle(base, wrap(h)).Methods("POST")
 
-	// ---------- PUT (collection) ----------
 	case "PUT":
-		put := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			controller.Create(w, r, modelType, overwrite)
-		})
-		router.Handle(base, wrap(put)).Methods("PUT")
+		var h http.HandlerFunc
+		if resource == "user" && authController != nil {
+			// Admin managed creation or idempotent upsert of users goes through Register
+			h = authController.Register
+		} else {
+			h = func(w http.ResponseWriter, r *http.Request) {
+				baseController.Create(w, r, modelType, overwrite)
+			}
+		}
+		router.Handle(base, wrap(h)).Methods("PUT")
 
-	// ---------- PATCH (single item) ----------
 	case "PATCH":
 		patch := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			controller.Update(w, r, modelType)
+			baseController.Update(w, r, modelType)
 		})
 		router.Handle(item, wrap(patch)).Methods("PATCH")
 
-	// ---------- DELETE (single item) ----------
 	case "DELETE":
 		del := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			controller.Delete(w, r, modelType)
+			baseController.Delete(w, r, modelType)
 		})
 		router.Handle(item, wrap(del)).Methods("DELETE")
 	}
@@ -94,79 +115,153 @@ func SetupRouter(
 		r.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)
 	}
 
-	// Unprotected login
+	// Public auth endpoints
 	r.HandleFunc("/login", authController.Login).Methods("POST")
+	r.HandleFunc("/register", authController.Register).Methods("POST")
 
-	// ---------- 1. Anonymous resources --------------------------------------
+	// ---------- 1. Anonymous resources ----------
 	anon := models.RolePermissions["anonymous"]
 
 	for _, res := range anon.Get {
-		registerCRUD(r, baseController, "GET", res, models.ModelMap[res], nil, false)
+		registerCRUD(r, baseController, authController, "GET", res, models.ModelMap[res], nil, nil, false)
 	}
 	for _, res := range anon.Post {
-		registerCRUD(r, baseController, "POST", res, models.ModelMap[res], nil, false)
+		registerCRUD(r, baseController, authController, "POST", res, models.ModelMap[res], nil, nil, false)
 	}
 	for _, res := range anon.Put {
-		registerCRUD(r, baseController, "PUT", res, models.ModelMap[res], nil, true)
+		registerCRUD(r, baseController, authController, "PUT", res, models.ModelMap[res], nil, nil, true)
 	}
 	for _, res := range anon.Patch {
-		registerCRUD(r, baseController, "PATCH", res, models.ModelMap[res], nil, false)
+		registerCRUD(r, baseController, authController, "PATCH", res, models.ModelMap[res], nil, nil, false)
 	}
 	for _, res := range anon.Delete {
-		registerCRUD(r, baseController, "DELETE", res, models.ModelMap[res], nil, false)
+		registerCRUD(r, baseController, authController, "DELETE", res, models.ModelMap[res], nil, nil, false)
 	}
 
-	// ---------- 2. Authenticated resources ----------------------------------
-	// Single subrouter with AuthMiddleware; RoleMiddleware is per-route.
+	// ---------- 2. Authenticated resources ----------
 	authSub := r.NewRoute().Subrouter()
 	authSub.Use(middlewares.AuthMiddleware(jwtSecret))
 
-	// me HandleFunc
+	// me endpoints
+	// Me endpoints available to any logged in user
 	authSub.HandleFunc("/me", authController.Me).Methods("GET", "POST")
+	authSub.HandleFunc("/me/api-key", authController.Me).Methods("POST")
 
-	// Build: method → resource → []roles  (collecting all non-anonymous roles)
-	methodRoles := map[string]map[string][]string{
+	// Build method -> resource -> {full, own} role lists
+	type both struct {
+		full []string
+		own  []string
+	}
+	methodRoles := map[string]map[string]*both{
 		"GET": {}, "POST": {}, "PUT": {}, "PATCH": {}, "DELETE": {},
 	}
 	for role, perms := range models.RolePermissions {
 		if role == "anonymous" {
 			continue
 		}
-		for _, r := range perms.Get {
-			methodRoles["GET"][r] = append(methodRoles["GET"][r], role)
+
+		for _, rsc := range perms.Get {
+			entry := methodRoles["GET"][rsc]
+			if entry == nil {
+				entry = &both{}
+				methodRoles["GET"][rsc] = entry
+			}
+			entry.full = append(entry.full, role)
 		}
-		for _, r := range perms.Post {
-			methodRoles["POST"][r] = append(methodRoles["POST"][r], role)
+		for _, rsc := range perms.Post {
+			entry := methodRoles["POST"][rsc]
+			if entry == nil {
+				entry = &both{}
+				methodRoles["POST"][rsc] = entry
+			}
+			entry.full = append(entry.full, role)
 		}
-		for _, r := range perms.Put {
-			methodRoles["PUT"][r] = append(methodRoles["PUT"][r], role)
+		for _, rsc := range perms.Put {
+			entry := methodRoles["PUT"][rsc]
+			if entry == nil {
+				entry = &both{}
+				methodRoles["PUT"][rsc] = entry
+			}
+			entry.full = append(entry.full, role)
 		}
-		for _, r := range perms.Patch {
-			methodRoles["PATCH"][r] = append(methodRoles["PATCH"][r], role)
+		for _, rsc := range perms.Patch {
+			entry := methodRoles["PATCH"][rsc]
+			if entry == nil {
+				entry = &both{}
+				methodRoles["PATCH"][rsc] = entry
+			}
+			entry.full = append(entry.full, role)
 		}
-		for _, r := range perms.Delete {
-			methodRoles["DELETE"][r] = append(methodRoles["DELETE"][r], role)
+		for _, rsc := range perms.Delete {
+			entry := methodRoles["DELETE"][rsc]
+			if entry == nil {
+				entry = &both{}
+				methodRoles["DELETE"][rsc] = entry
+			}
+			entry.full = append(entry.full, role)
+		}
+
+		// Own permissions
+		for _, rsc := range perms.GetOwn {
+			entry := methodRoles["GET"][rsc]
+			if entry == nil {
+				entry = &both{}
+				methodRoles["GET"][rsc] = entry
+			}
+			entry.own = append(entry.own, role)
+		}
+		for _, rsc := range perms.PostOwn {
+			entry := methodRoles["POST"][rsc]
+			if entry == nil {
+				entry = &both{}
+				methodRoles["POST"][rsc] = entry
+			}
+			entry.own = append(entry.own, role)
+		}
+		for _, rsc := range perms.PutOwn {
+			entry := methodRoles["PUT"][rsc]
+			if entry == nil {
+				entry = &both{}
+				methodRoles["PUT"][rsc] = entry
+			}
+			entry.own = append(entry.own, role)
+		}
+		for _, rsc := range perms.PatchOwn {
+			entry := methodRoles["PATCH"][rsc]
+			if entry == nil {
+				entry = &both{}
+				methodRoles["PATCH"][rsc] = entry
+			}
+			entry.own = append(entry.own, role)
+		}
+		for _, rsc := range perms.DeleteOwn {
+			entry := methodRoles["DELETE"][rsc]
+			if entry == nil {
+				entry = &both{}
+				methodRoles["DELETE"][rsc] = entry
+			}
+			entry.own = append(entry.own, role)
 		}
 	}
 
-	// Register every method/resource exactly once on authSub
-	for res, roles := range methodRoles["GET"] {
-		registerCRUD(authSub, baseController, "GET", res, models.ModelMap[res], roles, false)
+	// Register every method/resource on authSub with both role sets
+	for res, rs := range methodRoles["GET"] {
+		registerCRUD(authSub, baseController, authController, "GET", res, models.ModelMap[res], rs.full, rs.own, false)
 	}
-	for res, roles := range methodRoles["POST"] {
-		registerCRUD(authSub, baseController, "POST", res, models.ModelMap[res], roles, false)
+	for res, rs := range methodRoles["POST"] {
+		registerCRUD(authSub, baseController, authController, "POST", res, models.ModelMap[res], rs.full, rs.own, false)
 	}
-	for res, roles := range methodRoles["PUT"] {
-		registerCRUD(authSub, baseController, "PUT", res, models.ModelMap[res], roles, true)
+	for res, rs := range methodRoles["PUT"] {
+		registerCRUD(authSub, baseController, authController, "PUT", res, models.ModelMap[res], rs.full, rs.own, true)
 	}
-	for res, roles := range methodRoles["PATCH"] {
-		registerCRUD(authSub, baseController, "PATCH", res, models.ModelMap[res], roles, false)
+	for res, rs := range methodRoles["PATCH"] {
+		registerCRUD(authSub, baseController, authController, "PATCH", res, models.ModelMap[res], rs.full, rs.own, false)
 	}
-	for res, roles := range methodRoles["DELETE"] {
-		registerCRUD(authSub, baseController, "DELETE", res, models.ModelMap[res], roles, false)
+	for res, rs := range methodRoles["DELETE"] {
+		registerCRUD(authSub, baseController, authController, "DELETE", res, models.ModelMap[res], rs.full, rs.own, false)
 	}
 
-	// ---------- 3. /stats endpoint ------------------------------------------
+	// ---------- 3. /stats endpoint ----------
 	if userGUI {
 		sub := r.NewRoute().Subrouter()
 		sub.Use(middlewares.AuthMiddleware(jwtSecret))

@@ -3,6 +3,7 @@ package models
 import (
 	"reflect"
 	"strings"
+	"time"
 )
 
 // RelationalModelKeys lists which ModelMap entries need their own AutoMigrate pass.
@@ -35,7 +36,7 @@ func init() {
 	}
 }
 
-// ModelMap maps resource‐names to model pointers. (Update this with all models)
+// ModelMap maps resource names to model pointers. (Update this with all models)
 var ModelMap = map[string]interface{}{
 	"user":              &User{}, // Do not delete
 	"example1":          &Example1{},
@@ -52,32 +53,38 @@ type Example1 struct {
 
 	// Field2 stores additional data related to Example1.
 	Field2 string `gorm:"column:field2" json:"field2"`
+
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	LastUpdate time.Time `gorm:"column:last_update;autoUpdateTime" json:"last_update"`
+	CreatedBy  string    `gorm:"column:created_by" json:"created_by"`
+	EditedBy   string    `gorm:"column:edited_by" json:"edited_by"`
 }
 
 // Example2 represents another database table storing example data.
 type Example2 struct {
 	Field1 string `gorm:"column:field1;primaryKey" json:"field1"`
-	Field2 string `gorm:"column:field2"            json:"field2"`
+	Field2 string `gorm:"column:field2" json:"field2"`
+
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	LastUpdate time.Time `gorm:"column:last_update;autoUpdateTime" json:"last_update"`
+	CreatedBy  string    `gorm:"column:created_by" json:"created_by"`
+	EditedBy   string    `gorm:"column:edited_by" json:"edited_by"`
 }
 
 // ExampleRelational represents a relational table connecting Example1 and Example2.
 //
 // This struct defines a many-to-many relationship between Example1 and Example2.
 type ExampleRelational struct {
-	// Example1Field1 is a foreign key referencing Example1.
 	Example1Field1 string `gorm:"primaryKey;column:example1_field1" json:"example1_field1"`
-
-	// Example2Field1 is a foreign key referencing Example2.
 	Example2Field1 string `gorm:"primaryKey;column:example2_field1" json:"example2_field1"`
+	Field3         string `gorm:"column:field3" json:"field3"`
 
-	// Field3 stores additional relationship-related information.
-	Field3 string `gorm:"column:field3" json:"field3"`
+	// Use pointers and omit when empty
+	Example1Reference *Example1 `gorm:"foreignKey:Example1Field1;references:Field1;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"example1,omitempty"`
+	Example2Reference *Example2 `gorm:"foreignKey:Example2Field1;references:Field1;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"example2,omitempty"`
 
-	// Example1Reference establishes a foreign key relationship with Example1.
-	// Updates and deletions on Example1 cascade to ExampleRelational.
-	Example1Reference Example1 `gorm:"foreignKey:Example1Field1;references:Field1;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-
-	// Example2Reference establishes a foreign key relationship with Example2.
-	// Updates and deletions on Example2 cascade to ExampleRelational.
-	Example2Reference Example2 `gorm:"foreignKey:Example2Field1;references:Field1;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	LastUpdate time.Time `gorm:"column:last_update;autoUpdateTime" json:"last_update"`
+	CreatedBy  string    `gorm:"column:created_by" json:"created_by"`
+	EditedBy   string    `gorm:"column:edited_by" json:"edited_by"`
 }

@@ -65,59 +65,77 @@ definitions:
     x-enum-comments:
       AdminRole: '@Enum admin'
       UserRole: '@Enum user'
+    x-enum-descriptions:
+    - '@Enum admin'
+    - '@Enum user'
     x-enum-varnames:
     - AdminRole
     - UserRole
   models.UpdateUser:
     properties:
+      api_keys:
+        description: API keys assigned to the user (stored as JSON in DB) for scripting
+        items:
+          type: string
+        type: array
       created_at:
-        description: CreatedAt is the timestamp of when the user was created.
+        description: Audit
+        type: string
+      created_by:
+        type: string
+      edited_by:
+        type: string
+      email:
+        description: Contact
+        type: string
+      email_verified:
+        type: boolean
+      last_update:
         type: string
       new_password:
-        description: new field
-        example: s3cr3tP@ss
+        example: new_password
         type: string
       password:
-        description: |-
-          Password stores the hashed password for authentication.
-          The JSON tag omits this field in API responses for security reasons.
+        description: Authentication
         type: string
       role:
         allOf:
         - $ref: '#/definitions/models.Role'
-        description: Role defines the user's permissions, either "admin" or "user".
-      updated_at:
-        description: UpdatedAt is the timestamp of the last modification to the user
-          record.
-        type: string
+        description: Authorization
       username:
-        description: |-
-          Username is the unique identifier for the user.
-          It serves as the primary key in the database.
+        description: Primary key
         type: string
     type: object
   models.User:
     properties:
+      api_keys:
+        description: API keys assigned to the user (stored as JSON in DB) for scripting
+        items:
+          type: string
+        type: array
       created_at:
-        description: CreatedAt is the timestamp of when the user was created.
+        description: Audit
+        type: string
+      created_by:
+        type: string
+      edited_by:
+        type: string
+      email:
+        description: Contact
+        type: string
+      email_verified:
+        type: boolean
+      last_update:
         type: string
       password:
-        description: |-
-          Password stores the hashed password for authentication.
-          The JSON tag omits this field in API responses for security reasons.
+        description: Authentication
         type: string
       role:
         allOf:
         - $ref: '#/definitions/models.Role'
-        description: Role defines the user's permissions, either "admin" or "user".
-      updated_at:
-        description: UpdatedAt is the timestamp of the last modification to the user
-          record.
-        type: string
+        description: Authorization
       username:
-        description: |-
-          Username is the unique identifier for the user.
-          It serves as the primary key in the database.
+        description: Primary key
         type: string
     type: object
 info:
@@ -192,7 +210,7 @@ paths:
         name: resource
         required: true
         type: string
-      - description: If true, for single object duplicates → update instead of error
+      - description: If true, for single object duplicates update instead of error
         in: query
         name: overwrite
         type: boolean
@@ -229,8 +247,8 @@ paths:
     delete:
       consumes:
       - application/json
-      description: Deletes a resource identified by its primary key (or hyphen-separated
-        composite key).
+      description: Deletes a resource identified by its primary key. Supports composite
+        keys via hyphen-separated format.
       parameters:
       - description: Resource name (e.g., users, items)
         in: path
@@ -265,8 +283,8 @@ paths:
     get:
       consumes:
       - application/json
-      description: Fetches a single resource by its ID (supports composite keys via
-        hyphen-separated format).
+      description: Fetches a single resource by its ID. Supports composite keys via
+        hyphen-separated format.
       parameters:
       - description: Resource name (e.g., users, items)
         in: path
@@ -313,7 +331,7 @@ paths:
         name: id
         required: true
         type: string
-      - description: JSON object with fields to update (non-zero fields will be updated)
+      - description: JSON object with fields to update. Non-zero fields will be updated
         in: body
         name: payload
         required: true
@@ -498,6 +516,39 @@ paths:
           schema:
             $ref: '#/definitions/models.ErrorResponse'
       summary: Update current user's profile
+      tags:
+      - user
+      - auth
+  /me/api-key:
+    post:
+      consumes:
+      - application/json
+      description: GET returns the authenticated user's info; POST updates fields
+        like email or password.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User info returned or updated
+          schema:
+            $ref: '#/definitions/models.User'
+        "400":
+          description: Invalid input JSON
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: 'Unauthorized: missing or invalid token'
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Get or update current user's profile
       tags:
       - user
       - auth

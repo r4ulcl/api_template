@@ -108,7 +108,6 @@ func ConnectDB(cfg *utils.Config) {
 	DB = db
 }
 
-
 // CreateOrUpdateRecord attempts to create a new record. If a duplicate key error
 // is encountered (and overwrite == true), it falls back to an update.
 //
@@ -172,7 +171,7 @@ func isDuplicateKeyError(err error) bool {
 // - An error if retrieval fails.
 func (bc *BaseController) GetAllRecords(model interface{}, filters map[string]interface{}) error {
 	tx := bc.DB
-	modelType := reflect.TypeOf(model).Elem().Elem() // Get slice element type
+	modelType := reflect.TypeOf(model).Elem().Elem()
 
 	// Apply dynamic filters
 	for key, value := range filters {
@@ -180,14 +179,13 @@ func (bc *BaseController) GetAllRecords(model interface{}, filters map[string]in
 	}
 
 	// Preload relationships dynamically
-	for i := range modelType.NumField() {
+	for i := 0; i < modelType.NumField(); i++ {
 		field := modelType.Field(i)
-		if gormTag, ok := field.Tag.Lookup("gorm"); ok && strings.Contains(gormTag, "foreignKey") {
+		if gormTag, ok := field.Tag.Lookup("gorm"); ok && strings.Contains(gormTag, "foreignKey:") {
 			tx = tx.Preload(field.Name)
 		}
 	}
 
-	// Execute query
 	return tx.Find(model).Error
 }
 
@@ -202,31 +200,79 @@ func (bc *BaseController) GetAllRecords(model interface{}, filters map[string]in
 // Returns:
 // - An error if the record is not found.
 func (bc *BaseController) GetRecordsByID(model interface{}, id string) error {
-	log.Println("GetRecordsByID", model, id)
 	parts := strings.Split(id, "-")
 	primaryKeys := getPrimaryKeyFields(model)
-
-	log.Println("GetRecordsByID primaryKeys", primaryKeys)
-
 	if len(primaryKeys) != len(parts) {
 		return fmt.Errorf("mismatch between primary keys and tokenized ID")
 	}
 
-	// Build a map[columnName]value
 	pkMap := make(map[string]interface{}, len(primaryKeys))
 	for i, col := range primaryKeys {
 		pkMap[col] = parts[i]
 	}
-	log.Println("GetRecordsByID pkMap", pkMap)
 
-	// GORM will translate the map into `WHERE col1 = ? AND col2 = ? ...`
-	if err := bc.DB.First(model, pkMap).Error; err != nil {
+	// Preload belongs-to relations if present
+	modelType := reflect.TypeOf(model).Elem()
+	tx := bc.DB
+	for i := 0; i < modelType.NumField(); i++ {
+		field := modelType.Field(i)
+		if gormTag, ok := field.Tag.Lookup("gorm"); ok && strings.Contains(gormTag, "foreignKey:") {
+			tx = tx.Preload(field.Name)
+		}
+	}
+
+	if err := tx.First(model, pkMap).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("record not found")
 		}
 		return err
 	}
+	return nil
+}
 
+func (bc *BaseController) GetRecordsByIDWithSensitive(model interface{}, id string) error {
+	if model == nil {
+		return errors.New("model must be a non-nil pointer to a struct")
+	}
+
+	// Build PK map from "id" parts using struct field names detected as primary keys
+	parts := strings.Split(id, "-")
+	primaryKeys := getPrimaryKeyFields(model)
+	if len(primaryKeys) != len(parts) {
+		return fmt.Errorf("mismatch between primary keys and tokenized ID")
+	}
+	pkMap := make(map[string]interface{}, len(primaryKeys))
+	for i, col := range primaryKeys {
+		pkMap[col] = parts[i]
+	}
+
+	// Prepare a new session and preload any relation fields that declare a foreignKey
+	tx := bc.DB.Session(&gorm.Session{NewDB: true})
+	tx = tx.Select("*") // ensure all columns are selected
+
+	// Detect relations by gorm tag and preload them
+	modelType := reflect.TypeOf(model)
+	if modelType.Kind() == reflect.Ptr {
+		modelType = modelType.Elem()
+	}
+	if modelType.Kind() != reflect.Struct {
+		return errors.New("model must point to a struct")
+	}
+
+	for i := 0; i < modelType.NumField(); i++ {
+		field := modelType.Field(i)
+		if gTag, ok := field.Tag.Lookup("gorm"); ok && strings.Contains(gTag, "foreignKey:") {
+			tx = tx.Preload(field.Name)
+		}
+	}
+
+	// Fetch the record
+	if err := tx.First(model, pkMap).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("record not found")
+		}
+		return err
+	}
 	return nil
 }
 

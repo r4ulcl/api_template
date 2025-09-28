@@ -65,3 +65,46 @@ func ParseJWT(tokenString, secret string) (jwt.MapClaims, error) {
 
 	return nil, errors.New("invalid token")
 }
+
+// ParseJWTNoExpiry parses a JWT token using the provided secret
+// but **skips expiration validation**. It returns the token claims if valid.
+func ParseJWTNoExpiry(tokenString, secret string) (map[string]interface{}, error) {
+	// Parse without verifying exp claim
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Ensure the signing method is what we expect (HMAC)
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return []byte(secret), nil
+	}, jwt.WithoutClaimsValidation()) // disables exp/nbf checks
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate token signature
+	if !token.Valid {
+		return nil, errors.New("invalid token signature")
+	}
+
+	// Extract claims
+	if claims, ok := token.Claims.(jwt.MapClaims); ok {
+		return claims, nil
+	}
+
+	return nil, errors.New("invalid token claims")
+}
+
+// GenerateJWTNoExpiry creates a JWT token with no expiration time.
+func GenerateJWTNoExpiry(claims map[string]interface{}, secret string) (string, error) {
+	token := jwt.New(jwt.SigningMethodHS256)
+	c := jwt.MapClaims{}
+	for k, v := range claims {
+		c[k] = v
+	}
+	// Optionally include iat for creation time
+	c["iat"] = time.Now().Unix()
+
+	token.Claims = c
+	return token.SignedString([]byte(secret))
+}

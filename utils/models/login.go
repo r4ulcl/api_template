@@ -17,22 +17,27 @@ const (
 //
 // It contains authentication details and metadata like creation and update timestamps.
 type User struct {
-	// Username is the unique identifier for the user.
-	// It serves as the primary key in the database.
-	Username string `gorm:"primaryKey" json:"username"`
+	// Primary key
+	Username string `gorm:"primaryKey;column:username" json:"username"`
 
-	// Password stores the hashed password for authentication.
-	// The JSON tag omits this field in API responses for security reasons.
-	Password string `json:"password"`
+	// Authentication
+	Password string `gorm:"column:password" json:"password"` // never returned in API responses
 
-	// Role defines the user's permissions, either "admin" or "user".
-	Role Role `json:"role"`
+	// Authorization
+	Role Role `gorm:"column:role" json:"role"`
 
-	// CreatedAt is the timestamp of when the user was created.
-	CreatedAt time.Time `json:"created_at"`
+	// Contact
+	Email         string `gorm:"column:email;type:varchar(191);uniqueIndex" json:"email"`
+	EmailVerified bool   `gorm:"column:email_verified" json:"email_verified"`
 
-	// UpdatedAt is the timestamp of the last modification to the user record.
-	UpdatedAt time.Time `json:"updated_at"`
+	// API keys assigned to the user (stored as JSON in DB) for scripting
+	APIKeys []string `json:"api_keys" gorm:"type:json;serializer:json"`
+
+	// Audit
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	LastUpdate time.Time `gorm:"column:last_update;autoUpdateTime" json:"last_update"`
+	CreatedBy  string    `gorm:"column:created_by" json:"created_by"`
+	EditedBy   string    `gorm:"column:edited_by" json:"edited_by"`
 }
 
 // UpdateUserRequest represents the payload for updating a user, including an optional new password.

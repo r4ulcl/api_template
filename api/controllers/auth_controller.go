@@ -44,7 +44,7 @@ func (ac *AuthController) RegisterUser(user *models.User) (*models.User, error) 
 	user.Password = hashed
 
 	// Insert into DB
-	if err := ac.BC.CreateOrUpdateRecord(user, true); err != nil {
+	if err := ac.BC.CreateOrUpdateRecord(user, false); err != nil {
 		return nil, err
 	}
 
@@ -135,7 +135,7 @@ func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch the user by primary key (username)
 	var user models.User
-	if err := ac.BC.GetRecordsByID(&user, input.Username); err != nil {
+	if err := ac.BC.GetRecordsByIDWithSensitive(&user, input.Username); err != nil {
 
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid username or password"})

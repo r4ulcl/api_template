@@ -259,6 +259,54 @@ const docTemplate = `{
                 }
             }
         },
+        "/me/api-key": {
+            "post": {
+                "description": "GET returns the authenticated user's info; POST updates fields like email or password.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user",
+                    "auth"
+                ],
+                "summary": "Get or update current user's profile",
+                "responses": {
+                    "200": {
+                        "description": "User info returned or updated",
+                        "schema": {
+                            "$ref": "#/definitions/models.User"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input JSON",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized: missing or invalid token",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/{resource}": {
             "get": {
                 "description": "Retrieves records of a given resource, supporting complex filters, sorting, and pagination.",
@@ -349,7 +397,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "boolean",
-                        "description": "If true, for single object duplicates → update instead of error",
+                        "description": "If true, for single object duplicates update instead of error",
                         "name": "overwrite",
                         "in": "query"
                     },
@@ -393,7 +441,7 @@ const docTemplate = `{
         },
         "/{resource}/{id}": {
             "get": {
-                "description": "Fetches a single resource by its ID (supports composite keys via hyphen-separated format).",
+                "description": "Fetches a single resource by its ID. Supports composite keys via hyphen-separated format.",
                 "consumes": [
                     "application/json"
                 ],
@@ -470,7 +518,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "JSON object with fields to update (non-zero fields will be updated)",
+                        "description": "JSON object with fields to update. Non-zero fields will be updated",
                         "name": "payload",
                         "in": "body",
                         "required": true,
@@ -507,7 +555,7 @@ const docTemplate = `{
                 }
             },
             "delete": {
-                "description": "Deletes a resource identified by its primary key (or hyphen-separated composite key).",
+                "description": "Deletes a resource identified by its primary key. Supports composite keys via hyphen-separated format.",
                 "consumes": [
                     "application/json"
                 ],
@@ -655,6 +703,10 @@ const docTemplate = `{
                 "AdminRole": "@Enum admin",
                 "UserRole": "@Enum user"
             },
+            "x-enum-descriptions": [
+                "@Enum admin",
+                "@Enum user"
+            ],
             "x-enum-varnames": [
                 "AdminRole",
                 "UserRole"
@@ -663,33 +715,51 @@ const docTemplate = `{
         "models.UpdateUser": {
             "type": "object",
             "properties": {
+                "api_keys": {
+                    "description": "API keys assigned to the user (stored as JSON in DB) for scripting",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "created_at": {
-                    "description": "CreatedAt is the timestamp of when the user was created.",
+                    "description": "Audit",
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "edited_by": {
+                    "type": "string"
+                },
+                "email": {
+                    "description": "Contact",
+                    "type": "string"
+                },
+                "email_verified": {
+                    "type": "boolean"
+                },
+                "last_update": {
                     "type": "string"
                 },
                 "new_password": {
-                    "description": "new field",
                     "type": "string",
-                    "example": "s3cr3tP@ss"
+                    "example": "new_password"
                 },
                 "password": {
-                    "description": "Password stores the hashed password for authentication.\nThe JSON tag omits this field in API responses for security reasons.",
+                    "description": "Authentication",
                     "type": "string"
                 },
                 "role": {
-                    "description": "Role defines the user's permissions, either \"admin\" or \"user\".",
+                    "description": "Authorization",
                     "allOf": [
                         {
                             "$ref": "#/definitions/models.Role"
                         }
                     ]
                 },
-                "updated_at": {
-                    "description": "UpdatedAt is the timestamp of the last modification to the user record.",
-                    "type": "string"
-                },
                 "username": {
-                    "description": "Username is the unique identifier for the user.\nIt serves as the primary key in the database.",
+                    "description": "Primary key",
                     "type": "string"
                 }
             }
@@ -697,28 +767,47 @@ const docTemplate = `{
         "models.User": {
             "type": "object",
             "properties": {
+                "api_keys": {
+                    "description": "API keys assigned to the user (stored as JSON in DB) for scripting",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "created_at": {
-                    "description": "CreatedAt is the timestamp of when the user was created.",
+                    "description": "Audit",
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "edited_by": {
+                    "type": "string"
+                },
+                "email": {
+                    "description": "Contact",
+                    "type": "string"
+                },
+                "email_verified": {
+                    "type": "boolean"
+                },
+                "last_update": {
                     "type": "string"
                 },
                 "password": {
-                    "description": "Password stores the hashed password for authentication.\nThe JSON tag omits this field in API responses for security reasons.",
+                    "description": "Authentication",
                     "type": "string"
                 },
                 "role": {
-                    "description": "Role defines the user's permissions, either \"admin\" or \"user\".",
+                    "description": "Authorization",
                     "allOf": [
                         {
                             "$ref": "#/definitions/models.Role"
                         }
                     ]
                 },
-                "updated_at": {
-                    "description": "UpdatedAt is the timestamp of the last modification to the user record.",
-                    "type": "string"
-                },
                 "username": {
-                    "description": "Username is the unique identifier for the user.\nIt serves as the primary key in the database.",
+                    "description": "Primary key",
                     "type": "string"
                 }
             }

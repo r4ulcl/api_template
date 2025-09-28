@@ -13,18 +13,112 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/r4ulcl/api_template/api/middlewares"
 	"github.com/r4ulcl/api_template/database"
 	"github.com/r4ulcl/api_template/utils/models"
 	"gorm.io/gorm"
 )
 
 // Controller provides methods for handling CRUD operations.
-//
 // It encapsulates a reference to the BaseController for database interactions.
 type Controller struct {
 	BC *database.BaseController
+}
+
+const ownerColumn = "created_by"
+
+// ------------------------------------------------------------------
+// Helpers for ownership and audit fields
+// ------------------------------------------------------------------
+
+func ownOnlyAndUserID(r *http.Request) (bool, string) {
+	ownOnly := middlewares.IsOwnOnly(r.Context())
+	uidVal := r.Context().Value(middlewares.ContextUserID)
+	userID, _ := uidVal.(string)
+	return ownOnly, userID
+}
+
+// zeroAuditFields sets CreatedAt, LastUpdate, CreatedBy to their zero values
+// and leaves EditedBy untouched so callers can set it when needed.
+func zeroAuditFields(model interface{}) {
+	v := reflect.ValueOf(model)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return
+	}
+	setIf := func(name string, zero interface{}) {
+		f := v.FieldByName(name)
+		if f.IsValid() && f.CanSet() {
+			switch f.Kind() {
+			case reflect.String:
+				f.SetString("")
+			case reflect.Struct:
+				// usually time.Time
+				if f.Type() == reflect.TypeOf(time.Time{}) {
+					f.Set(reflect.ValueOf(time.Time{}))
+				}
+			}
+		}
+	}
+	setIf("CreatedAt", time.Time{})
+	setIf("LastUpdate", time.Time{})
+	setIf("CreatedBy", "")
+	// do not change EditedBy here
+}
+
+// setAuditOnCreate sets audit fields for create operations.
+// CreatedAt and LastUpdate are left zero so GORM auto timestamps take effect.
+func setAuditOnCreate(model interface{}, userID string) {
+	v := reflect.ValueOf(model)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return
+	}
+	zeroAuditFields(model)
+	if f := v.FieldByName("EditedBy"); f.IsValid() && f.CanSet() && f.Kind() == reflect.String {
+		f.SetString(userID)
+	}
+	if f := v.FieldByName("CreatedBy"); f.IsValid() && f.CanSet() && f.Kind() == reflect.String {
+		f.SetString(userID)
+	}
+}
+
+// setAuditOnUpdate sets EditedBy and prevents audit fields from being overridden.
+func setAuditOnUpdate(model interface{}, userID string) {
+	zeroAuditFields(model)
+	v := reflect.ValueOf(model)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return
+	}
+	if f := v.FieldByName("EditedBy"); f.IsValid() && f.CanSet() && f.Kind() == reflect.String {
+		f.SetString(userID)
+	}
+}
+
+// getCreatedBy tries to read CreatedBy from a loaded model value.
+func getCreatedBy(model interface{}) (string, bool) {
+	v := reflect.ValueOf(model)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return "", false
+	}
+	f := v.FieldByName("CreatedBy")
+	if f.IsValid() && f.Kind() == reflect.String {
+		return f.String(), true
+	}
+	return "", false
 }
 
 // ------------------------------------------------------------------
@@ -34,16 +128,14 @@ type Controller struct {
 // Create persists one or more new records into the database.
 // @Summary     Create one or more records
 // @Description Accepts either a single JSON object or an array of JSON objects for the given resource.
-//
-//	If `overwrite=true` and a duplicate-key conflict occurs, existing records are updated.
-//
+// If `overwrite=true` and a duplicate-key conflict occurs, existing records are updated.
 // @Tags        admin
 // @Accept      json
 // @Produce     json
 // @Param       resource   path      string  true   "Resource name (e.g., users, items)"
-// @Param       overwrite  query     bool    false  "If true, for single object duplicates → update instead of error"
+// @Param       overwrite  query     bool    false  "If true, for single object duplicates update instead of error"
 // @Param       payload    body      object  true   "A single JSON object or an array of JSON objects matching model schema"
-// @Success     201        {object}  object            "The created record, or list of created records"
+// @Success     201        {object}  object              "The created record, or list of created records"
 // @Failure     400        {object}  models.ErrorResponse "Bad request (invalid JSON or missing fields)"
 // @Failure     409        {object}  models.ErrorResponse "Conflict (duplicate key and overwrite=false) for single object"
 // @Failure     500        {object}  models.ErrorResponse "Internal server error"
@@ -51,12 +143,13 @@ type Controller struct {
 func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interface{}, overwrite bool) {
 	w.Header().Set("Condent-Type", "application/json")
 
+	ownOnly, userID := ownOnlyAndUserID(r)
+
 	// 1) Read raw body to detect if it's an array or single object
 	var buf bytes.Buffer
-	tee := io.TeeReader(r.Body, &buf) // tee lets us inspect then reuse
+	tee := io.TeeReader(r.Body, &buf)
 	firstBytes := make([]byte, 1)
 
-	// Read first non-whitespace byte
 	for {
 		n, err := tee.Read(firstBytes)
 		if err != nil && err != io.EOF {
@@ -71,56 +164,59 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 			break
 		}
 	}
-	// Reconstruct r.Body so that full JSON is available below
 	r.Body = io.NopCloser(io.MultiReader(&buf, r.Body))
 
 	trimmedFirst := bytes.TrimSpace(firstBytes)
 	if len(trimmedFirst) > 0 && trimmedFirst[0] == '[' {
-		// ---- BULK INSERT PATH ----
+		// Bulk insert path
 
-		// 2) Build a slice type whose element is the underlying model type
-		//    E.g. if model is *User, elemType = reflect.TypeOf(User{}), then sliceType = []User
 		modelVal := reflect.ValueOf(model)
 		if modelVal.Kind() != reflect.Ptr {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Model must be a pointer"})
 			return
 		}
-		elemType := modelVal.Type().Elem()     // e.g. User
-		sliceType := reflect.SliceOf(elemType) // []User
-		slicePtr := reflect.New(sliceType)     // *[]User
+		elemType := modelVal.Type().Elem()
+		sliceType := reflect.SliceOf(elemType)
+		slicePtr := reflect.New(sliceType)
 
-		// 3) Unmarshal entire body into *[]T
 		if err := json.NewDecoder(r.Body).Decode(slicePtr.Interface()); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid JSON array: " + err.Error()})
 			return
 		}
 
-		// 4) Bulk-create using GORM (no Overwrite support here—pure INSERT)
+		// Set audit fields and enforce ownership if ownOnly
+		slice := slicePtr.Elem()
+		for i := 0; i < slice.Len(); i++ {
+			elem := slice.Index(i)
+			if elem.CanAddr() {
+				setAuditOnCreate(elem.Addr().Interface(), userID)
+			}
+			if ownOnly && elem.CanAddr() {
+				// ownership is CreatedBy which setAuditOnCreate already sets
+			}
+		}
+
 		tx := c.BC.DB.Create(slicePtr.Interface())
 		if tx.Error != nil {
-			// If this is a duplicate-key error, return 409
 			if strings.Contains(tx.Error.Error(), "duplicate") {
 				w.WriteHeader(http.StatusConflict)
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: tx.Error.Error()})
 				return
 			}
-			// Other DB errors → 500
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: tx.Error.Error()})
 			return
 		}
 
-		// 5) Return the slice of created records (GORM does fill any default columns)
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(slicePtr.Interface())
 		return
 	}
 
-	// ---- SINGLE OBJECT PATH ----
+	// Single object path
 
-	// 6) Decode into the single model instance
 	if err := json.NewDecoder(r.Body).Decode(model); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		log.Println("r.Body", r.Body)
@@ -128,21 +224,21 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 		return
 	}
 
-	// 7) Attempt to CreateOrUpdateRecord (honoring 'overwrite' flag)
+	// Set audit fields and enforce ownership if ownOnly
+	setAuditOnCreate(model, userID)
+
+	// Create or update according to flag
 	if err := c.BC.CreateOrUpdateRecord(model, overwrite); err != nil {
 		if strings.Contains(err.Error(), "duplicate") {
-			// Duplicate key + overwrite==false → conflict
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
 			return
 		}
-		// Other errors → 500
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	// 8) Return the newly created/updated single object
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(model)
 }
@@ -195,7 +291,9 @@ type paginationLinks struct {
 func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// 1) Parse "page" and "page_size" parameters (with defaults)
+	ownOnly, userID := ownOnlyAndUserID(r)
+
+	// 1) Parse "page" and "page_size" parameters
 	queryVals := r.URL.Query()
 	pageParam := queryVals.Get("page")
 	perPageParam := queryVals.Get("page_size")
@@ -213,28 +311,28 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 	// 2) Prepare base GORM instance and apply filters/sort
 	baseModel := c.BC.DB.Model(model)
 
+	// Ownership scope for list
+	if ownOnly && userID != "" {
+		baseModel = baseModel.Where(ownerColumn+" = ?", userID)
+	}
+
 	// 2a) Apply advanced filters
 	applyFilters := func(db *gorm.DB) *gorm.DB {
 		for rawKey, vals := range queryVals {
-			// Skip pagination & sort keys
 			if rawKey == "page" || rawKey == "page_size" || rawKey == "sort" {
 				continue
 			}
-
-			// Expect keys of the form: filter[field][operator]
 			if !strings.HasPrefix(rawKey, "filter[") {
 				continue
 			}
-
 			inside := strings.TrimPrefix(rawKey, "filter[")
 			if !strings.HasSuffix(inside, "]") {
-				continue // malformed
+				continue
 			}
-			inside = inside[:len(inside)-1] // e.g. "field][contains"
-
+			inside = inside[:len(inside)-1]
 			parts := strings.SplitN(inside, "][", 2)
 			if len(parts) != 2 {
-				continue // malformed
+				continue
 			}
 			field := parts[0]
 			operator := parts[1]
@@ -245,12 +343,10 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 				db = db.Where(fmt.Sprintf("%s = ?", field), value)
 			case "ne", "neq":
 				db = db.Where(fmt.Sprintf("%s <> ?", field), value)
-
 			case "contains":
 				db = db.Where(fmt.Sprintf("%s LIKE ?", field), "%"+value+"%")
 			case "ncontains":
 				db = db.Where(fmt.Sprintf("%s NOT LIKE ?", field), "%"+value+"%")
-
 			case "gt":
 				db = db.Where(fmt.Sprintf("%s > ?", field), value)
 			case "gte":
@@ -259,14 +355,12 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 				db = db.Where(fmt.Sprintf("%s < ?", field), value)
 			case "lte":
 				db = db.Where(fmt.Sprintf("%s <= ?", field), value)
-
 			case "in":
 				list := strings.Split(value, ",")
 				db = db.Where(fmt.Sprintf("%s IN ?", field), list)
 			case "nin":
 				list := strings.Split(value, ",")
 				db = db.Where(fmt.Sprintf("%s NOT IN ?", field), list)
-
 			case "isnull":
 				vLower := strings.ToLower(value)
 				if vLower == "true" || vLower == "1" {
@@ -274,22 +368,19 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 				} else {
 					db = db.Where(fmt.Sprintf("%s IS NOT NULL", field))
 				}
-
 			default:
-				// Unknown operator → skip
 				continue
 			}
 		}
 		return db
 	}
 
-	// 2b) Apply sorting (if provided)
+	// 2b) Apply sorting
 	applySort := func(db *gorm.DB) *gorm.DB {
 		sortParam := queryVals.Get("sort")
 		if strings.TrimSpace(sortParam) == "" {
 			return db
 		}
-
 		fields := strings.Split(sortParam, ",")
 		for _, f := range fields {
 			f = strings.TrimSpace(f)
@@ -306,7 +397,7 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 		return db
 	}
 
-	// 3) Count total items (apply filters only)
+	// 3) Count total items
 	countDB := baseModel.Session(&gorm.Session{})
 	countDB = applyFilters(countDB)
 
@@ -319,9 +410,9 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 
 	// 4) Calculate pagination offsets
 	offset := (page - 1) * perPage
-	totalPages := int((totalItems + int64(perPage) - 1) / int64(perPage)) // ceil
+	totalPages := int((totalItems + int64(perPage) - 1) / int64(perPage))
 
-	// 5) Fetch the actual page of data (apply filters, sort, limit, offset)
+	// 5) Fetch page
 	dataDB := baseModel.Session(&gorm.Session{})
 	dataDB = applyFilters(dataDB)
 	dataDB = applySort(dataDB)
@@ -409,7 +500,7 @@ func copyQueryExcluding(src url.Values, keysToSkip []string) url.Values {
 
 // GetByID retrieves a single record by its primary key.
 // @Summary     Get a record by ID
-// @Description Fetches a single resource by its ID (supports composite keys via hyphen-separated format).
+// @Description Fetches a single resource by its ID. Supports composite keys via hyphen-separated format.
 // @Tags        user,admin
 // @Accept      json
 // @Produce     json
@@ -425,17 +516,28 @@ func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model inter
 	vars := mux.Vars(r)
 	tokenizedID := vars["id"]
 
+	ownOnly, userID := ownOnlyAndUserID(r)
+
+	// Load by ID using existing BaseController helper
 	if err := c.BC.GetRecordsByID(model, tokenizedID); err != nil {
-		// If it's a “not found” error, return 404
 		if strings.Contains(err.Error(), "record not found") {
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
 			return
 		}
-		// Otherwise, 500
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
 		return
+	}
+
+	// If ownOnly, verify ownership using CreatedBy
+	if ownOnly {
+		if createdBy, ok := getCreatedBy(model); !ok || createdBy != userID {
+			// Act as not found to avoid leaking information
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "record not found"})
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -454,7 +556,7 @@ func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model inter
 // @Produce     json
 // @Param       resource   path      string  true  "Resource name (e.g., users, items)"
 // @Param       id         path      string  true  "Primary key (or hyphen-separated composite key)"
-// @Param       payload    body      object  true  "JSON object with fields to update (non-zero fields will be updated)"
+// @Param       payload    body      object  true  "JSON object with fields to update. Non-zero fields will be updated"
 // @Success     200        {object}  object  "The updated record"
 // @Failure     400        {object}  models.ErrorResponse "Invalid input JSON"
 // @Failure     404        {object}  models.ErrorResponse "Record not found"
@@ -466,11 +568,37 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 	vars := mux.Vars(r)
 	tokenizedID := vars["id"]
 
+	ownOnly, userID := ownOnlyAndUserID(r)
+
+	// If ownOnly, verify ownership before applying update
+	if ownOnly {
+		// Load existing record by ID
+		temp := reflect.New(reflect.TypeOf(model).Elem()).Interface()
+		if err := c.BC.GetRecordsByID(temp, tokenizedID); err != nil {
+			if strings.Contains(err.Error(), "record not found") {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+			return
+		}
+		if createdBy, ok := getCreatedBy(temp); !ok || createdBy != userID {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "record not found"})
+			return
+		}
+	}
+
 	if err := json.NewDecoder(r.Body).Decode(model); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
 		return
 	}
+
+	// Prevent audit field tampering and set editor
+	setAuditOnUpdate(model, userID)
 
 	if err := c.BC.UpdateRecords(model, tokenizedID); err != nil {
 		if strings.Contains(err.Error(), "record not found") {
@@ -493,7 +621,7 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 
 // Delete removes a record by its primary key.
 // @Summary     Delete a record
-// @Description Deletes a resource identified by its primary key (or hyphen-separated composite key).
+// @Description Deletes a resource identified by its primary key. Supports composite keys via hyphen-separated format.
 // @Tags        admin
 // @Accept      json
 // @Produce     json
@@ -508,6 +636,28 @@ func (c *Controller) Delete(w http.ResponseWriter, r *http.Request, model interf
 
 	vars := mux.Vars(r)
 	tokenizedID := vars["id"]
+
+	ownOnly, userID := ownOnlyAndUserID(r)
+
+	// If ownOnly, verify ownership before deletion
+	if ownOnly {
+		temp := reflect.New(reflect.TypeOf(model).Elem()).Interface()
+		if err := c.BC.GetRecordsByID(temp, tokenizedID); err != nil {
+			if strings.Contains(err.Error(), "no records deleted") || strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "record not found") {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+			return
+		}
+		if createdBy, ok := getCreatedBy(temp); !ok || createdBy != userID {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "record not found"})
+			return
+		}
+	}
 
 	if err := c.BC.DeleteRecords(model, tokenizedID); err != nil {
 		if strings.Contains(err.Error(), "no records deleted") || strings.Contains(err.Error(), "not found") {

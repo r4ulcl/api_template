@@ -11,7 +11,8 @@ import (
 	"github.com/r4ulcl/api_template/utils/models"
 )
 
-// Me handles GET /me (fetch profile) and POST /me (update profile)
+// Me handles GET /me and POST /me
+// Also handles POST /me/api-key by delegating to GenerateAPIKey
 // @Summary     Get or update current user's profile
 // @Description GET returns the authenticated user's info; POST updates fields like email or password.
 // @Tags        user, auth
@@ -23,8 +24,16 @@ import (
 // @Failure     404   {object} models.ErrorResponse    "User not found"
 // @Failure     500   {object} models.ErrorResponse    "Internal server error"
 // @Router      /me [get]
+// @Router      /me [post]
+// @Router      /me/api-key [post]
 func (ac *AuthController) Me(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	// Special case: POST /me/api-key
+	if r.Method == http.MethodPost && strings.HasSuffix(strings.TrimRight(r.URL.Path, "/"), "/me/api-key") {
+		ac.GenerateAPIKey(w, r)
+		return
+	}
 
 	switch r.Method {
 	case http.MethodGet:
@@ -205,4 +214,62 @@ func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Reque
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(user)
+}
+
+// GenerateAPIKey creates a permanent API key (JWT without expiry)
+// for the authenticated user.
+func (ac *AuthController) GenerateAPIKey(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Only allow POST
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1) Extract current user from context
+	uidVal := r.Context().Value(middlewares.ContextUserID)
+	rlVal := r.Context().Value(middlewares.ContextRole)
+	username, _ := uidVal.(string)
+	role, _ := rlVal.(string)
+	if username == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Unauthorized"})
+		return
+	}
+
+	// 2) Load full user record
+	var user models.User
+	if err := ac.BC.GetRecordsByID(&user, username); err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "User not found"})
+		return
+	}
+
+	// 3) Generate a JWT token without expiry
+	token, err := utils.GenerateJWTNoExpiry(map[string]interface{}{
+		"username": user.Username,
+		"role":     role, // use the role from context
+	}, ac.Secret)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Failed to create API key"})
+		return
+	}
+
+	// 4) Append the new API key to user’s list and persist
+	user.APIKeys = append(user.APIKeys, token)
+	if err := ac.BC.CreateOrUpdateRecord(&user, true); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	// 5) Respond with the key (never return all user info)
+	resp := map[string]string{
+		"api_key": token,
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }
