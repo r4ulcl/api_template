@@ -45,11 +45,11 @@ func getEnvAsBool(key string, defaultVal bool) bool {
 // LoadConfig loads environment variables or uses default values for database and authentication configuration.
 func LoadConfig() *Config {
 	return &Config{
-		DBHost:         getEnv("DB_HOST", "localhost"),              // Default: localhost
-		DBPort:         getEnv("DB_PORT", "3306"),                   // Default: 3306
-		DBUser:         getEnv("DB_USER", "root"),                   // Default: root
-		DBPassword:     getEnv("DB_PASSWORD", ""),                   // Default: empty string
-		DBName:         getEnv("DB_NAME", "demo_db"),                // Default: demo_db
+		DBHost:         getEnv("MYSQL_HOST", "localhost"),           // Default: localhost
+		DBPort:         getEnv("MYSQL_PORT", "3306"),                // Default: 3306
+		DBUser:         getEnv("MYSQL_USER", "root"),                // Default: root
+		DBPassword:     getEnv("MYSQL_PASSWORD", ""),                // Default: empty string
+		DBName:         getEnv("MYSQL_DATABASE", "demo_db"),         // Default: demo_db
 		JWTSecret:      getEnv("JWT_SECRET", "your_jwt_secret_key"), // Default: "your_jwt_secret_key"
 		AdminPassword:  getEnv("ADMIN_PASSWORD", ""),                // Default: empty string
 		PublicRegister: getEnvAsBool("PUBLIC_REGISTER", false),      // Default: false
