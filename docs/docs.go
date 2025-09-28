@@ -25,45 +25,6 @@ const docTemplate = `{
     "basePath": "{{.BasePath}}",
     "paths": {
         "/login": {
-            "get": {
-                "description": "Accepts username and password as query parameters and returns a token if valid.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "Authenticate user via query params (GET)",
-                "responses": {
-                    "200": {
-                        "description": "JWT token returned",
-                        "schema": {
-                            "$ref": "#/definitions/models.JWTResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing or invalid fields",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized (invalid credentials)",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    }
-                }
-            },
             "put": {
                 "description": "Accepts JWT using PUT. Returns a new JWT if valid.",
                 "consumes": [
@@ -156,7 +117,7 @@ const docTemplate = `{
         },
         "/me": {
             "get": {
-                "description": "GET returns the authenticated user's info; POST updates fields like email or password.",
+                "description": "Get userinformation",
                 "consumes": [
                     "application/json"
                 ],
@@ -164,31 +125,24 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "user",
-                    "auth"
+                    "user"
                 ],
-                "summary": "Get or update current user's profile",
+                "summary": "Authenticate user via query params (GET)",
                 "responses": {
                     "200": {
-                        "description": "User info returned or updated",
+                        "description": "JWT token returned",
                         "schema": {
-                            "$ref": "#/definitions/models.User"
+                            "$ref": "#/definitions/models.JWTResponse"
                         }
                     },
                     "400": {
-                        "description": "Invalid input JSON",
+                        "description": "Missing or invalid fields",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "401": {
-                        "description": "Unauthorized: missing or invalid token",
-                        "schema": {
-                            "$ref": "#/definitions/models.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "User not found",
+                        "description": "Unauthorized (invalid credentials)",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -210,8 +164,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "user",
-                    "auth"
+                    "user"
                 ],
                 "summary": "Update current user's profile",
                 "parameters": [
@@ -261,7 +214,7 @@ const docTemplate = `{
         },
         "/me/api-key": {
             "post": {
-                "description": "GET returns the authenticated user's info; POST updates fields like email or password.",
+                "description": "Allows the authenticated user to generate a new API key without expiration for use in scripts or integrations.",
                 "consumes": [
                     "application/json"
                 ],
@@ -272,28 +225,149 @@ const docTemplate = `{
                     "user",
                     "auth"
                 ],
-                "summary": "Get or update current user's profile",
+                "summary": "Generate API key",
                 "responses": {
                     "200": {
-                        "description": "User info returned or updated",
+                        "description": "API key successfully created",
                         "schema": {
-                            "$ref": "#/definitions/models.User"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "400": {
-                        "description": "Invalid input JSON",
+                        "description": "Bad request (invalid input)",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "401": {
-                        "description": "Unauthorized: missing or invalid token",
+                        "description": "Unauthorized (invalid or missing token)",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Duplicate API key (unexpected conflict)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/me/api-key/{apiKey}": {
+            "delete": {
+                "description": "Disables a specific API key for the authenticated user so it can no longer be used.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user",
+                    "auth"
+                ],
+                "summary": "Revoke API key",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "API key to revoke",
+                        "name": "apiKey",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "revoked: true",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request (missing apiKey)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized (invalid or missing token)",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "API key not found",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/register": {
+            "post": {
+                "description": "Accepts JSON input with username and password to create a new user.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Register a new user account",
+                "parameters": [
+                    {
+                        "description": "User registration data",
+                        "name": "user",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.User"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "User successfully registered",
+                        "schema": {
+                            "$ref": "#/definitions/models.User"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input JSON or missing fields",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "User already exists",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -715,13 +789,6 @@ const docTemplate = `{
         "models.UpdateUser": {
             "type": "object",
             "properties": {
-                "api_keys": {
-                    "description": "API keys assigned to the user (stored as JSON in DB) for scripting",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
                 "created_at": {
                     "description": "Audit",
                     "type": "string"
@@ -767,13 +834,6 @@ const docTemplate = `{
         "models.User": {
             "type": "object",
             "properties": {
-                "api_keys": {
-                    "description": "API keys assigned to the user (stored as JSON in DB) for scripting",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
                 "created_at": {
                     "description": "Audit",
                     "type": "string"

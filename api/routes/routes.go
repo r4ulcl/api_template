@@ -106,7 +106,7 @@ func SetupRouter(
 	baseController *controllers.Controller,
 	authController *controllers.AuthController,
 	jwtSecret string,
-	userGUI, swagger bool,
+	publicRegister, userGUI, swagger bool,
 ) *mux.Router {
 	r := mux.NewRouter()
 	r.Use(mux.CORSMethodMiddleware(r))
@@ -117,7 +117,10 @@ func SetupRouter(
 
 	// Public auth endpoints
 	r.HandleFunc("/login", authController.Login).Methods("POST")
-	r.HandleFunc("/register", authController.Register).Methods("POST")
+
+	if publicRegister {
+		r.HandleFunc("------------------------ /register", authController.Register).Methods("POST")
+	}
 
 	// ---------- 1. Anonymous resources ----------
 	anon := models.RolePermissions["anonymous"]
@@ -140,12 +143,29 @@ func SetupRouter(
 
 	// ---------- 2. Authenticated resources ----------
 	authSub := r.NewRoute().Subrouter()
-	authSub.Use(middlewares.AuthMiddleware(jwtSecret))
+	authSub.Use(middlewares.AuthMiddleware(jwtSecret, baseController.BC.DB))
 
 	// me endpoints
 	// Me endpoints available to any logged in user
 	authSub.HandleFunc("/me", authController.Me).Methods("GET", "POST")
-	authSub.HandleFunc("/me/api-key", authController.Me).Methods("POST")
+
+	// Collect all non-anonymous roles for own access on /me routes
+	allAuthRoles := make([]string, 0, len(models.RolePermissions))
+	for role := range models.RolePermissions {
+		if role != "anonymous" {
+			allAuthRoles = append(allAuthRoles, role)
+		}
+	}
+	// Wrap DeleteAPIKey with OwnScopeMiddleware so only owners can delete their key
+	authSub.Handle(
+		"/me/api-key/{apiKey}",
+		middlewares.OwnScopeMiddleware(nil, allAuthRoles)(http.HandlerFunc(authController.DeleteAPIKey)),
+	).Methods(http.MethodDelete)
+
+	authSub.Handle(
+		"/me/api-key/{apiKey}",
+		middlewares.OwnScopeMiddleware(nil, allAuthRoles)(http.HandlerFunc(authController.GenerateAPIKey)),
+	).Methods(http.MethodPost)
 
 	// Build method -> resource -> {full, own} role lists
 	type both struct {
@@ -264,11 +284,11 @@ func SetupRouter(
 	// ---------- 3. /stats endpoint ----------
 	if userGUI {
 		sub := r.NewRoute().Subrouter()
-		sub.Use(middlewares.AuthMiddleware(jwtSecret))
+		sub.Use(middlewares.AuthMiddleware(jwtSecret, baseController.BC.DB))
 		sub.HandleFunc("/stats", baseController.GetDBStats).Methods("GET")
 	} else {
 		sub := r.NewRoute().Subrouter()
-		sub.Use(middlewares.AuthMiddleware(jwtSecret))
+		sub.Use(middlewares.AuthMiddleware(jwtSecret, baseController.BC.DB))
 		sub.Use(middlewares.RoleMiddleware("admin"))
 		sub.HandleFunc("/stats", baseController.GetDBStats).Methods("GET")
 	}

@@ -55,6 +55,18 @@ func (ac *AuthController) RegisterUser(user *models.User) (*models.User, error) 
 
 // Register is the HTTP handler that leverages RegisterUser()
 // to perform the actual user registration logic.
+//
+// @Summary     Register a new user account
+// @Description Accepts JSON input with username and password to create a new user.
+// @Tags        auth
+// @Accept      json
+// @Produce     json
+// @Param       user  body      models.User            true  "User registration data"
+// @Success     201   {object}  models.User            "User successfully registered"
+// @Failure     400   {object}  models.ErrorResponse   "Invalid input JSON or missing fields"
+// @Failure     409   {object}  models.ErrorResponse   "User already exists"
+// @Failure     500   {object}  models.ErrorResponse   "Internal server error"
+// @Router      /register [post]
 func (ac *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -96,7 +108,7 @@ func (ac *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		ac.handleRenewToken(w, r)
 	default:
-		w.Header().Set("Allow", "POST, GET, PUT")
+		w.Header().Set("Allow", "POST, PUT")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }

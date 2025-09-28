@@ -2,17 +2,19 @@ package controllers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/gorilla/mux"
 	"github.com/r4ulcl/api_template/api/middlewares"
 	"github.com/r4ulcl/api_template/utils"
 	"github.com/r4ulcl/api_template/utils/models"
+	"gorm.io/gorm"
 )
 
 // Me handles GET /me and POST /me
-// Also handles POST /me/api-key by delegating to GenerateAPIKey
 // @Summary     Get or update current user's profile
 // @Description GET returns the authenticated user's info; POST updates fields like email or password.
 // @Tags        user, auth
@@ -28,13 +30,6 @@ import (
 // @Router      /me/api-key [post]
 func (ac *AuthController) Me(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
-	// Special case: POST /me/api-key
-	if r.Method == http.MethodPost && strings.HasSuffix(strings.TrimRight(r.URL.Path, "/"), "/me/api-key") {
-		ac.GenerateAPIKey(w, r)
-		return
-	}
-
 	switch r.Method {
 	case http.MethodGet:
 		ac.handleGetUserInfo(w, r)
@@ -49,7 +44,7 @@ func (ac *AuthController) Me(w http.ResponseWriter, r *http.Request) {
 // handleUpdateUserInfo processes POST /me: update own info (e.g. password, email, etc.)
 // @Summary     Update current user's profile
 // @Description Allows the authenticated user to change email and/or password. To change password, both current and new passwords are required.
-// @Tags        user, auth
+// @Tags        user
 // @Accept      json
 // @Produce     json
 // @Param       update body     models.UpdateUser true "Fields to update"
@@ -60,18 +55,19 @@ func (ac *AuthController) Me(w http.ResponseWriter, r *http.Request) {
 // @Failure     500    {object} models.ErrorResponse    "Internal server error"
 // @Router      /me [post]
 func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Request) {
-	// 1) Get current user & role from context
+	// 1) Auth context
 	uidVal := r.Context().Value(middlewares.ContextUserID)
 	rlVal := r.Context().Value(middlewares.ContextRole)
 	currentUsername, _ := uidVal.(string)
-	currentRole, _ := rlVal.(string)
+	currentRoleStr, _ := rlVal.(string)
 	if currentUsername == "" {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Unauthorized"})
 		return
 	}
+	currentRole := models.Role(currentRoleStr)
 
-	// 2) Load their record
+	// 2) Load current user's record
 	var user models.User
 	if err := ac.BC.GetRecordsByID(&user, currentUsername); err != nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -79,43 +75,34 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// 3) Decode into a generic map so we can inspect all keys
+	// 3) Decode twice
+	//    a) into a map to know which fields were provided
+	//    b) into a typed struct for convenient access
 	var payload map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid JSON"})
 		return
 	}
+	// Reconstruct body for second decode if needed
+	bodyBytes, _ := json.Marshal(payload)
+	var req models.UpdateUser
+	_ = json.Unmarshal(bodyBytes, &req)
 
-	// 4) Define which roles get “power” access
-	powerRoles := map[string]bool{
-		string(models.AdminRole): true,
-		// add other elevated roles here...
+	// 4) Get whitelist for caller role
+	allowed, ok := models.UpdateUserWhitelist[currentRole]
+	if !ok {
+		allowed = map[string]bool{}
 	}
 
-	// 5) Build the two whitelists
-	regularAllowed := map[string]bool{
-		"username":     true,
-		"password":     true, // for verifying current password
-		"new_password": true,
+	// 5) Reject any disallowed fields and block username pivots
+	if _, hasUsername := payload["username"]; hasUsername {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+			Error: "cannot update field \"username\" via this endpoint",
+		})
+		return
 	}
-	adminAllowed := map[string]bool{
-		"username":     true,
-		"role":         true,
-		"password":     true,
-		"new_password": true,
-		// add any other JSON-exposed User fields (e.g. email) here
-	}
-
-	// 6) Pick the right whitelist
-	var allowed map[string]bool
-	if powerRoles[currentRole] {
-		allowed = adminAllowed
-	} else {
-		allowed = regularAllowed
-	}
-
-	// 7) Reject any disallowed fields
 	for key := range payload {
 		if !allowed[key] {
 			w.WriteHeader(http.StatusBadRequest)
@@ -126,29 +113,36 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	// 8) Apply changes
-
-	// — Username
-	if raw, ok := payload["username"]; ok {
-		if newU, ok2 := raw.(string); ok2 && newU != "" && newU != user.Username {
-			user.Username = strings.TrimSpace(newU)
-		}
+	// 6) Apply generic field updates
+	// Email
+	if _, ok := payload["email"]; ok {
+		user.Email = strings.TrimSpace(req.Email)
+	}
+	// EmailVerified
+	if _, ok := payload["email_verified"]; ok {
+		user.EmailVerified = req.EmailVerified
+	}
+	// Role
+	if _, ok := payload["role"]; ok {
+		user.Role = models.Role(strings.TrimSpace(string(req.Role)))
 	}
 
-	// — Role (only if in adminAllowed, i.e. powerRoles)
-	if raw, ok := payload["role"]; ok && allowed["role"] {
-		if r2, ok2 := raw.(string); ok2 {
-			user.Role = models.Role(r2)
-		}
-	}
-
-	// — Password change
-	if rawNew, ok := payload["new_password"]; ok {
-		newP, _ := rawNew.(string)
-		if newP != "" {
+	// 7) Password change
+	if _, ok := payload["new_password"]; ok && strings.TrimSpace(req.NewPassword) != "" {
+		if currentRole == models.AdminRole {
+			// Admin path without current password
+			hashed, err := utils.HashPassword(req.NewPassword)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "failed to hash new password"})
+				return
+			}
+			user.Password = hashed
+		} else {
+			// Regular user must provide current password
 			currRaw, hasCurr := payload["password"]
 			currP, _ := currRaw.(string)
-			if !hasCurr || currP == "" {
+			if !hasCurr || strings.TrimSpace(currP) == "" {
 				w.WriteHeader(http.StatusBadRequest)
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "current password required"})
 				return
@@ -158,7 +152,7 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "current password incorrect"})
 				return
 			}
-			hashed, err := utils.HashPassword(newP)
+			hashed, err := utils.HashPassword(req.NewPassword)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "failed to hash new password"})
@@ -168,29 +162,29 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	// 9) Persist
+	// 8) Persist
 	if err := ac.BC.CreateOrUpdateRecord(&user, false); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	// 10) Return sanitized user
+	// 9) Return sanitized user
 	user.Password = ""
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(user)
 }
 
 // @Summary     Authenticate user via query params (GET)
-// @Description Accepts username and password as query parameters and returns a token if valid.
-// @Tags        auth
+// @Description Get userinformation
+// @Tags        user
 // @Accept      json
 // @Produce     json
 // @Success     200       {object}  models.JWTResponse    "JWT token returned"
 // @Failure     400       {object}  models.ErrorResponse  "Missing or invalid fields"
 // @Failure     401       {object}  models.ErrorResponse  "Unauthorized (invalid credentials)"
 // @Failure     500       {object}  models.ErrorResponse  "Internal server error"
-// @Router      /login [get]
+// @Router      /me [get]
 func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Request) {
 	// Retrieve user ID from context (set by AuthMiddleware)
 	userIDVal := r.Context().Value(middlewares.ContextUserID)
@@ -216,19 +210,27 @@ func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(user)
 }
 
-// GenerateAPIKey creates a permanent API key (JWT without expiry)
-// for the authenticated user.
+// handleGenerateAPIKey processes POST /me/api-key: generate a new permanent API key
+// @Summary     Generate API key
+// @Description Allows the authenticated user to generate a new API key without expiration for use in scripts or integrations.
+// @Tags        user, auth
+// @Accept      json
+// @Produce     json
+// @Success     200    {object} map[string]string       "API key successfully created"
+// @Failure     400    {object} models.ErrorResponse    "Bad request (invalid input)"
+// @Failure     401    {object} models.ErrorResponse    "Unauthorized (invalid or missing token)"
+// @Failure     404    {object} models.ErrorResponse    "User not found"
+// @Failure     409    {object} models.ErrorResponse    "Duplicate API key (unexpected conflict)"
+// @Failure     500    {object} models.ErrorResponse    "Internal server error"
+// @Router      /me/api-key [post]
 func (ac *AuthController) GenerateAPIKey(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	// Only allow POST
 	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
+		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 
-	// 1) Extract current user from context
 	uidVal := r.Context().Value(middlewares.ContextUserID)
 	rlVal := r.Context().Value(middlewares.ContextRole)
 	username, _ := uidVal.(string)
@@ -239,37 +241,104 @@ func (ac *AuthController) GenerateAPIKey(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 2) Load full user record
-	var user models.User
-	if err := ac.BC.GetRecordsByID(&user, username); err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "User not found"})
-		return
-	}
-
-	// 3) Generate a JWT token without expiry
 	token, err := utils.GenerateJWTNoExpiry(map[string]interface{}{
-		"username": user.Username,
-		"role":     role, // use the role from context
+		"username": username,
+		"role":     role,
 	}, ac.Secret)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Failed to create API key"})
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Failed to generate API key"})
 		return
 	}
 
-	// 4) Append the new API key to user’s list and persist
-	user.APIKeys = append(user.APIKeys, token)
-	if err := ac.BC.CreateOrUpdateRecord(&user, true); err != nil {
+	err = ac.createAPIKey(username, token)
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]string{"api_key": token})
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "User not found"})
+	case strings.Contains(err.Error(), "Duplicate entry"):
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Duplicate API key"})
+	default:
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+	}
+}
+
+// createAPIKey inserts a new API key for a given user.
+func (ac *AuthController) createAPIKey(username, token string) error {
+	// Ensure user exists
+	var user models.User
+	if err := ac.BC.DB.First(&user, "username = ?", username).Error; err != nil {
+		return err
+	}
+
+	apiKey := models.APIKey{
+		Token:    token,
+		Username: username,
+		Enabled:  true,
+	}
+	return ac.BC.DB.Create(&apiKey).Error
+}
+
+// handleDeleteAPIKey processes DELETE /me/api-key/{apiKey}
+// @Summary     Revoke API key
+// @Description Disables a specific API key for the authenticated user so it can no longer be used.
+// @Tags        user, auth
+// @Accept      json
+// @Produce     json
+// @Param       apiKey path string true "API key to revoke"
+// @Success     200    {object} map[string]bool         "revoked: true"
+// @Failure     400    {object} models.ErrorResponse    "Bad request (missing apiKey)"
+// @Failure     401    {object} models.ErrorResponse    "Unauthorized (invalid or missing token)"
+// @Failure     404    {object} models.ErrorResponse    "API key not found"
+// @Failure     500    {object} models.ErrorResponse    "Internal server error"
+// @Router      /me/api-key/{apiKey} [delete]
+func (ac *AuthController) DeleteAPIKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.Header().Set("Allow", http.MethodDelete)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	uidVal := r.Context().Value(middlewares.ContextUserID)
+	username, _ := uidVal.(string)
+	if username == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Unauthorized"})
 		return
 	}
 
-	// 5) Respond with the key (never return all user info)
-	resp := map[string]string{
-		"api_key": token,
+	apiKey := mux.Vars(r)["apiKey"]
+	if apiKey == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Missing apiKey in path"})
+		return
 	}
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+
+	err := ac.disableAPIKey(username, apiKey)
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"revoked": true})
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "API key not found"})
+	default:
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+	}
+}
+
+// disableAPIKey disables (revokes) a user's API key.
+func (ac *AuthController) disableAPIKey(username, token string) error {
+	var rec models.APIKey
+	if err := ac.BC.DB.First(&rec, "token = ? AND username = ?", token, username).Error; err != nil {
+		return err
+	}
+	return ac.BC.DB.Model(&rec).Update("enabled", false).Error
 }

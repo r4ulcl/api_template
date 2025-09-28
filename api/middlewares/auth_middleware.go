@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/r4ulcl/api_template/utils"
 	"github.com/r4ulcl/api_template/utils/models"
+	"gorm.io/gorm"
 )
 
 // ContextKey defines a type for context keys to avoid collisions.
@@ -21,69 +24,96 @@ const (
 	ContextRole ContextKey = "role"
 )
 
-// AuthMiddleware validates either:
-// - Bearer JWT with exp validation
-// - API key JWT (no expiry) provided as Authorization: ApiKey <token> or X-API-Key: <token>
-// On success it sets ContextUserID and ContextRole.
-func AuthMiddleware(secret string) func(http.Handler) http.Handler {
+func AuthMiddleware(secret string, db *gorm.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			apiKeyHeader := strings.TrimSpace(r.Header.Get("X-API-Key"))
 
-			authHeader := r.Header.Get("Authorization")
-			apiKeyHeader := r.Header.Get("X-API-Key")
+			// Pick a candidate token from either header
+			var tokenStr string
+			switch {
+			case strings.HasPrefix(authHeader, "Bearer "):
+				tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+			case strings.HasPrefix(authHeader, "ApiKey "):
+				tokenStr = strings.TrimPrefix(authHeader, "ApiKey ")
+			case authHeader != "":
+				tokenStr = authHeader // bare token accepted
+			case apiKeyHeader != "":
+				tokenStr = apiKeyHeader
+			default:
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Missing authentication credentials"})
+				return
+			}
 
-			// 1) Bearer JWT with standard validation
-			if authHeader != "" {
-				tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-				claims, err := utils.ParseJWT(tokenString, secret)
-				if err != nil {
+			// Parse once without exp validation to read claims safely
+			claims, err := utils.ParseJWTNoExpiry(tokenStr, secret)
+			if err != nil {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid token"})
+				return
+			}
+
+			username, role, ok := extractUserAndRole(claims)
+			if !ok || username == "" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Token missing required claims"})
+				return
+			}
+
+			// If token has exp, enforce expiry and treat as Bearer
+			if exp, ok := getExpUnix(claims); ok {
+				now := time.Now().Unix()
+				if now >= exp {
 					w.WriteHeader(http.StatusUnauthorized)
-					_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid token"})
+					_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Token expired"})
 					return
 				}
-				username, role, ok := extractUserAndRole(claims)
-				if !ok {
-					w.WriteHeader(http.StatusUnauthorized)
-					_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Token missing required claims"})
-					return
-				}
+				// Valid exp-based JWT accepted as Bearer
 				ctx := context.WithValue(r.Context(), ContextUserID, username)
 				ctx = context.WithValue(ctx, ContextRole, role)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 
-			// 2) API key JWT (no expiry). Accept two header styles.
-			apiKey := ""
-			if strings.HasPrefix(authHeader, "ApiKey ") {
-				apiKey = strings.TrimPrefix(authHeader, "ApiKey ")
-			} else if apiKeyHeader != "" {
-				apiKey = apiKeyHeader
-			}
-			if apiKey != "" {
-				claims, err := utils.ParseJWTNoExpiry(apiKey, secret) // must skip exp validation
-				if err != nil {
-					w.WriteHeader(http.StatusUnauthorized)
-					_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid API key"})
-					return
-				}
-				username, role, ok := extractUserAndRole(claims)
-				if !ok {
-					w.WriteHeader(http.StatusUnauthorized)
-					_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "API key missing required claims"})
-					return
-				}
-				ctx := context.WithValue(r.Context(), ContextUserID, username)
-				ctx = context.WithValue(ctx, ContextRole, role)
-				next.ServeHTTP(w, r.WithContext(ctx))
+			// No exp present, treat as API key and verify in DB
+			var rec models.APIKey
+			if err := db.First(&rec, "token = ? AND username = ? AND enabled = ?", tokenStr, username, true).Error; err != nil {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "API key not recognized or disabled"})
 				return
 			}
+			_ = db.Model(&rec).Update("last_used", time.Now()).Error
 
-			// 3) No supported credentials
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Missing authentication credentials"})
+			ctx := context.WithValue(r.Context(), ContextUserID, username)
+			ctx = context.WithValue(ctx, ContextRole, role)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// getExpUnix extracts the exp claim as a Unix timestamp if present.
+func getExpUnix(claims map[string]interface{}) (int64, bool) {
+	v, ok := claims["exp"]
+	if !ok || v == nil {
+		return 0, false
+	}
+	switch t := v.(type) {
+	case float64:
+		return int64(t), true
+	case int64:
+		return t, true
+	case json.Number:
+		if n, err := t.Int64(); err == nil {
+			return n, true
+		}
+	case string:
+		if n, err := strconv.ParseInt(t, 10, 64); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
 }
 
 // extractUserAndRole pulls username and role out of JWT claims.

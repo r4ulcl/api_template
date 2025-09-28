@@ -73,11 +73,6 @@ definitions:
     - UserRole
   models.UpdateUser:
     properties:
-      api_keys:
-        description: API keys assigned to the user (stored as JSON in DB) for scripting
-        items:
-          type: string
-        type: array
       created_at:
         description: Audit
         type: string
@@ -108,11 +103,6 @@ definitions:
     type: object
   models.User:
     properties:
-      api_keys:
-        description: API keys assigned to the user (stored as JSON in DB) for scripting
-        items:
-          type: string
-        type: array
       created_at:
         description: Audit
         type: string
@@ -360,33 +350,6 @@ paths:
       tags:
       - admin
   /login:
-    get:
-      consumes:
-      - application/json
-      description: Accepts username and password as query parameters and returns a
-        token if valid.
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: JWT token returned
-          schema:
-            $ref: '#/definitions/models.JWTResponse'
-        "400":
-          description: Missing or invalid fields
-          schema:
-            $ref: '#/definitions/models.ErrorResponse'
-        "401":
-          description: Unauthorized (invalid credentials)
-          schema:
-            $ref: '#/definitions/models.ErrorResponse'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/models.ErrorResponse'
-      summary: Authenticate user via query params (GET)
-      tags:
-      - auth
     post:
       consumes:
       - application/json
@@ -451,35 +414,29 @@ paths:
     get:
       consumes:
       - application/json
-      description: GET returns the authenticated user's info; POST updates fields
-        like email or password.
+      description: Get userinformation
       produces:
       - application/json
       responses:
         "200":
-          description: User info returned or updated
+          description: JWT token returned
           schema:
-            $ref: '#/definitions/models.User'
+            $ref: '#/definitions/models.JWTResponse'
         "400":
-          description: Invalid input JSON
+          description: Missing or invalid fields
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "401":
-          description: 'Unauthorized: missing or invalid token'
-          schema:
-            $ref: '#/definitions/models.ErrorResponse'
-        "404":
-          description: User not found
+          description: Unauthorized (invalid credentials)
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      summary: Get or update current user's profile
+      summary: Authenticate user via query params (GET)
       tags:
       - user
-      - auth
     post:
       consumes:
       - application/json
@@ -518,39 +475,119 @@ paths:
       summary: Update current user's profile
       tags:
       - user
-      - auth
   /me/api-key:
     post:
       consumes:
       - application/json
-      description: GET returns the authenticated user's info; POST updates fields
-        like email or password.
+      description: Allows the authenticated user to generate a new API key without
+        expiration for use in scripts or integrations.
       produces:
       - application/json
       responses:
         "200":
-          description: User info returned or updated
+          description: API key successfully created
           schema:
-            $ref: '#/definitions/models.User'
+            additionalProperties:
+              type: string
+            type: object
         "400":
-          description: Invalid input JSON
+          description: Bad request (invalid input)
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "401":
-          description: 'Unauthorized: missing or invalid token'
+          description: Unauthorized (invalid or missing token)
           schema:
             $ref: '#/definitions/models.ErrorResponse'
         "404":
           description: User not found
           schema:
             $ref: '#/definitions/models.ErrorResponse'
+        "409":
+          description: Duplicate API key (unexpected conflict)
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal server error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      summary: Get or update current user's profile
+      summary: Generate API key
       tags:
       - user
+      - auth
+  /me/api-key/{apiKey}:
+    delete:
+      consumes:
+      - application/json
+      description: Disables a specific API key for the authenticated user so it can
+        no longer be used.
+      parameters:
+      - description: API key to revoke
+        in: path
+        name: apiKey
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'revoked: true'
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad request (missing apiKey)
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized (invalid or missing token)
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: API key not found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Revoke API key
+      tags:
+      - user
+      - auth
+  /register:
+    post:
+      consumes:
+      - application/json
+      description: Accepts JSON input with username and password to create a new user.
+      parameters:
+      - description: User registration data
+        in: body
+        name: user
+        required: true
+        schema:
+          $ref: '#/definitions/models.User'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: User successfully registered
+          schema:
+            $ref: '#/definitions/models.User'
+        "400":
+          description: Invalid input JSON or missing fields
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "409":
+          description: User already exists
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Register a new user account
+      tags:
       - auth
 schemes:
 - http

@@ -39,6 +39,7 @@ func init() {
 // ModelMap maps resource names to model pointers. (Update this with all models)
 var ModelMap = map[string]interface{}{
 	"user":              &User{}, // Do not delete
+	"apiKey":            &APIKey{},
 	"example1":          &Example1{},
 	"example2":          &Example2{},
 	"exampleRelational": &ExampleRelational{},

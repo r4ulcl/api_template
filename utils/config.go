@@ -8,15 +8,16 @@ import (
 
 // Config struct holds the configuration variables needed for connecting to a database and managing JWT.
 type Config struct {
-	DBHost        string // Database host (e.g., "localhost")
-	DBPort        string // Database port (e.g., "3306")
-	DBUser        string // Database username (e.g., "root")
-	DBPassword    string // Database password (e.g., "password")
-	DBName        string // Database name (e.g., "demo_db")
-	JWTSecret     string // JWT secret key for token signing
-	AdminPassword string // Admin password (e.g., "admin_secret")
-	UserGUI       bool   // Allow user to access stats
-	Swagger       bool   // Enable swagger endpoint
+	DBHost         string // Database host (e.g., "localhost")
+	DBPort         string // Database port (e.g., "3306")
+	DBUser         string // Database username (e.g., "root")
+	DBPassword     string // Database password (e.g., "password")
+	DBName         string // Database name (e.g., "demo_db")
+	JWTSecret      string // JWT secret key for token signing
+	AdminPassword  string // Admin password (e.g., "admin_secret")
+	PublicRegister bool   // Register without auth
+	UserGUI        bool   // Allow user to access stats
+	Swagger        bool   // Enable swagger endpoint
 }
 
 // getEnv fetches an environment variable or returns the provided default value.
@@ -44,15 +45,16 @@ func getEnvAsBool(key string, defaultVal bool) bool {
 // LoadConfig loads environment variables or uses default values for database and authentication configuration.
 func LoadConfig() *Config {
 	return &Config{
-		DBHost:        getEnv("DB_HOST", "localhost"),              // Default: localhost
-		DBPort:        getEnv("DB_PORT", "3306"),                   // Default: 3306
-		DBUser:        getEnv("DB_USER", "root"),                   // Default: root
-		DBPassword:    getEnv("DB_PASSWORD", ""),                   // Default: empty string
-		DBName:        getEnv("DB_NAME", "demo_db"),                // Default: demo_db
-		JWTSecret:     getEnv("JWT_SECRET", "your_jwt_secret_key"), // Default: "your_jwt_secret_key"
-		AdminPassword: getEnv("ADMIN_PASSWORD", ""),                // Default: empty string
-		UserGUI:       getEnvAsBool("USER_GUI", false),             // Default: false
-		Swagger:       getEnvAsBool("SWAGGER", false),              // Default: false
+		DBHost:         getEnv("DB_HOST", "localhost"),              // Default: localhost
+		DBPort:         getEnv("DB_PORT", "3306"),                   // Default: 3306
+		DBUser:         getEnv("DB_USER", "root"),                   // Default: root
+		DBPassword:     getEnv("DB_PASSWORD", ""),                   // Default: empty string
+		DBName:         getEnv("DB_NAME", "demo_db"),                // Default: demo_db
+		JWTSecret:      getEnv("JWT_SECRET", "your_jwt_secret_key"), // Default: "your_jwt_secret_key"
+		AdminPassword:  getEnv("ADMIN_PASSWORD", ""),                // Default: empty string
+		PublicRegister: getEnvAsBool("PUBLIC_REGISTER", false),      // Default: false
+		UserGUI:        getEnvAsBool("USER_GUI", false),             // Default: false
+		Swagger:        getEnvAsBool("SWAGGER", false),              // Default: false
 	}
 }
 
