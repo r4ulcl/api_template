@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/r4ulcl/api_template/api/middlewares"
 	"github.com/r4ulcl/api_template/utils/models"
+	"gorm.io/gorm"
 )
 
 // TableStats holds detailed statistics for a single table, including its PK columns.
@@ -69,10 +71,67 @@ type statsLinks struct {
 func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// 1. Determine the current database/schema
+	// Role and user ID from context
+	roleVal := r.Context().Value(middlewares.ContextRole)
+	role, _ := roleVal.(string)
+	uidVal := r.Context().Value(middlewares.ContextUserID)
+	userID, _ := uidVal.(string)
+
+	// Resolve which resources this role can access, and how
+	perms, ok := models.RolePermissions[role]
+	if !ok {
+		// Unknown role → no access to any table
+		writeStats(w, r, nil)
+		return
+	}
+
+	// Build a map of tableName → accessMode ("full" or "own")
+	accessByTable := map[string]string{}
+
+	// Helper to get GORM table name for a model pointer
+	getTableName := func(db *gorm.DB, model interface{}) (string, error) {
+		stmt := &gorm.Statement{DB: db}
+		if err := stmt.Parse(model); err != nil {
+			return "", err
+		}
+		return stmt.Schema.Table, nil
+	}
+
+	// First, mark own access
+	for _, res := range perms.GetOwn {
+		modelPtr, exists := models.ModelMap[res]
+		if !exists {
+			continue
+		}
+		if tbl, err := getTableName(c.BC.DB, modelPtr); err == nil {
+			// Only set to own if not already full
+			if accessByTable[tbl] == "" {
+				accessByTable[tbl] = "own"
+			}
+		}
+	}
+
+	// Then, upgrade to full where applicable
+	for _, res := range perms.Get {
+		modelPtr, exists := models.ModelMap[res]
+		if !exists {
+			continue
+		}
+		if tbl, err := getTableName(c.BC.DB, modelPtr); err == nil {
+			accessByTable[tbl] = "full"
+		}
+	}
+
+	// If no allowed tables, respond with empty data
+	if len(accessByTable) == 0 {
+		writeStats(w, r, nil)
+		return
+	}
+
+	// Current schema
 	dbName := c.BC.DB.Migrator().CurrentDatabase()
 
-	// 2. Query information_schema.tables for metrics (excluding TABLE_ROWS itself)
+	// Raw row for information_schema details
 	type rawStat struct {
 		TableName      string     `gorm:"column:TABLE_NAME"`
 		DataLength     uint64     `gorm:"column:DATA_LENGTH"`
@@ -91,6 +150,12 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		ColumnCount    uint64     `gorm:"column:COLUMN_COUNT"`
 		IndexCount     uint64     `gorm:"column:INDEX_COUNT"`
 		PKColumns      string     `gorm:"column:PRIMARY_KEY"` // comma‐separated PK names
+	}
+
+	// Collect the allowed table names to pass into the IN clause
+	allowedTables := make([]string, 0, len(accessByTable))
+	for tbl := range accessByTable {
+		allowedTables = append(allowedTables, tbl)
 	}
 
 	var rawStats []rawStat
@@ -135,7 +200,8 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 				) AS PRIMARY_KEY
 			FROM information_schema.tables t
 			WHERE t.table_schema = ?
-		`, dbName).
+			  AND t.table_name IN (?)
+		`, dbName, allowedTables).
 		Scan(&rawStats).
 		Error
 
@@ -145,13 +211,22 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. For each rawStat, run a SELECT COUNT(*) to get an exact row count.
+	// For each row, compute exact count with access mode
 	stats := make([]TableStats, 0, len(rawStats))
 	for _, rs := range rawStats {
+		mode := accessByTable[rs.TableName]
 		var exactCount int64
-		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`", rs.TableName)
-		if err := c.BC.DB.Raw(countQuery).Scan(&exactCount).Error; err != nil {
-			exactCount = -1
+
+		if mode == "own" {
+			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s` WHERE `created_by` = ?", rs.TableName)
+			if err := c.BC.DB.Raw(countQuery, userID).Scan(&exactCount).Error; err != nil {
+				exactCount = -1
+			}
+		} else {
+			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `%s`", rs.TableName)
+			if err := c.BC.DB.Raw(countQuery).Scan(&exactCount).Error; err != nil {
+				exactCount = -1
+			}
 		}
 
 		stats = append(stats, TableStats{
@@ -177,24 +252,29 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// 4. Build pagination metadata and links (single page only)
-	totalItems := len(stats)
+	// Respond with one page containing only the permitted tables
+	writeStats(w, r, stats)
+}
+
+// writeStats builds the pagination envelope and writes the response.
+func writeStats(w http.ResponseWriter, r *http.Request, stats []TableStats) {
+	totalItems := 0
+	if stats != nil {
+		totalItems = len(stats)
+	}
 	currentPage := 1
 	perPage := totalItems
+	if perPage == 0 {
+		perPage = 0
+	}
 	totalPages := 1
 
-	// Reconstruct the request’s base path + query (to fill “self”)
 	basePath := r.URL.Path
 	q := r.URL.Query()
 	q.Set("page", fmt.Sprintf("%d", currentPage))
 	q.Set("page_size", fmt.Sprintf("%d", perPage))
 	selfURL := basePath + "?" + q.Encode()
 
-	// First and Last are the same since only one page exists
-	firstURL := selfURL
-	lastURL := selfURL
-
-	// No Prev/Next if only one page
 	resp := paginatedStatsResponse{
 		Data: stats,
 		Meta: statsPagination{
@@ -205,12 +285,11 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		},
 		Links: statsLinks{
 			Self:  selfURL,
-			First: firstURL,
-			Last:  lastURL,
+			First: selfURL,
+			Last:  selfURL,
 		},
 	}
 
-	// 5. Return JSON
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
 }
