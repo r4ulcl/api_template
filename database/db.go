@@ -227,7 +227,7 @@ func (bc *BaseController) GetRecordsByID(model interface{}, id string) error {
 
 	if err := tx.First(model, pkMap).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errors.New("record not found")
+			return errors.New("Record not found or access denied.")
 		}
 		return err
 	}
@@ -268,7 +268,7 @@ func (bc *BaseController) GetRecordsByIDWithSensitive(model interface{}, id stri
 
 	if err := tx.First(model, pkMap).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errors.New("record not found")
+			return errors.New("Record not found or access denied.")
 		}
 		return err
 	}
@@ -324,7 +324,7 @@ func (bc *BaseController) UpdateRecords(model interface{}, id string) error {
 
 	if err := tx.Updates(model).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errors.New("record not found")
+			return errors.New("Record not found or access denied.")
 		}
 		return err
 	}
@@ -346,19 +346,37 @@ func (bc *BaseController) DeleteRecords(model interface{}, id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse schema: %w", err)
 	}
+
 	if len(pkCols) != len(parts) {
-		return fmt.Errorf("mismatch between primary keys (%d) and tokenized ID parts (%d)", len(pkCols), len(parts))
+		return fmt.Errorf(
+			"mismatch between primary keys (%d) and tokenized ID parts (%d)",
+			len(pkCols), len(parts),
+		)
 	}
 
-	tx := bc.DB.Debug().Session(&gorm.Session{NewDB: true}).Model(model)
+	// Real execution with verbose logging
+	tx := bc.DB.
+		Session(&gorm.Session{NewDB: true}).
+		Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Info)}).
+		Debug().
+		Model(model)
+
+	// Dry run to log exact SQL and vars
+	dry := bc.DB.
+		Session(&gorm.Session{NewDB: true, DryRun: true}).
+		Model(model)
+
 	for i, col := range pkCols {
 		tx = tx.Where(col+" = ?", parts[i])
+		dry = dry.Where(col+" = ?", parts[i])
 	}
 
+	// Execute
 	res := tx.Delete(model)
 	if res.Error != nil {
 		return res.Error
 	}
+
 	if res.RowsAffected == 0 {
 		return fmt.Errorf("no records deleted for ID %s", id)
 	}
@@ -380,28 +398,6 @@ func getPrimaryKeyFields(model interface{}) []string {
 	}
 
 	return primaryKeys
-}
-
-// getJSONPrimaryKeys extracts JSON field names for primary keys.
-func getJSONPrimaryKeys(model interface{}) []string {
-	var keys []string
-
-	typ := reflect.TypeOf(model)
-	if typ.Kind() == reflect.Ptr {
-		typ = typ.Elem()
-	}
-
-	for i := range typ.NumField() {
-		field := typ.Field(i)
-		if strings.Contains(field.Tag.Get("gorm"), "primaryKey") {
-			jsonTag := field.Tag.Get("json")
-			// Handle cases where json tag might have options like "id,omitempty"
-			jsonField := strings.Split(jsonTag, ",")[0]
-			keys = append(keys, jsonField)
-		}
-	}
-
-	return keys
 }
 
 // getPrimaryKeyValues extracts the primary key values from the model.

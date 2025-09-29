@@ -543,7 +543,7 @@ func copyQueryExcluding(src url.Values, keysToSkip []string) url.Values {
 // @Param       resource   path      string  true  "Resource name (e.g., users, items)"
 // @Param       id         path      string  true  "Primary key (or hyphen-separated composite key)"
 // @Success     200        {object}  object  "The requested record"
-// @Failure     404        {object}  models.ErrorResponse "Record not found"
+// @Failure     404        {object}  models.ErrorResponse "Record not found or access denied."
 // @Failure     500        {object}  models.ErrorResponse "Internal server error"
 // @Router      /{resource}/{id} [get]
 func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model interface{}) {
@@ -556,7 +556,7 @@ func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model inter
 
 	// Load by ID using existing BaseController helper
 	if err := c.BC.GetRecordsByID(model, tokenizedID); err != nil {
-		if strings.Contains(err.Error(), "record not found") {
+		if strings.Contains(err.Error(), "Record not found or access denied.") {
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
 			return
@@ -569,7 +569,7 @@ func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model inter
 	// If ownOnly, verify ownership using CreatedBy
 	if ownOnly && !hasOwnership(model, userID) {
 		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "record not found"})
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Record not found or access denied."})
 		return
 	}
 
@@ -592,7 +592,7 @@ func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model inter
 // @Param       payload    body      object  true  "JSON object with fields to update. Non-zero fields will be updated"
 // @Success     200        {object}  object  "The updated record"
 // @Failure     400        {object}  models.ErrorResponse "Invalid input JSON"
-// @Failure     404        {object}  models.ErrorResponse "Record not found"
+// @Failure     404        {object}  models.ErrorResponse "Record not found or access denied."
 // @Failure     500        {object}  models.ErrorResponse "Internal server error"
 // @Router      /{resource}/{id} [put]
 func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interface{}) {
@@ -606,7 +606,7 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 	// If ownOnly, verify ownership before applying update
 	if ownOnly && !ownsByID(c, model, tokenizedID, userID) {
 		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "record not found"})
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Record not found or access denied."})
 		return
 	}
 
@@ -620,7 +620,7 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 	setAuditOnUpdate(model, userID)
 
 	if err := c.BC.UpdateRecords(model, tokenizedID); err != nil {
-		if strings.Contains(err.Error(), "record not found") {
+		if strings.Contains(err.Error(), "Record not found or access denied.") {
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
 			return
@@ -647,7 +647,7 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 // @Param       resource   path      string  true  "Resource name (e.g., users, items)"
 // @Param       id         path      string  true  "Primary key (or hyphen-separated composite key)"
 // @Success     200        {object}  map[string]string  "Success message"
-// @Failure     404        {object}  models.ErrorResponse "Record not found"
+// @Failure     404        {object}  models.ErrorResponse "Record not found or access denied."
 // @Failure     500        {object}  models.ErrorResponse "Internal server error"
 // @Router      /{resource}/{id} [delete]
 func (c *Controller) Delete(w http.ResponseWriter, r *http.Request, model interface{}) {
@@ -661,7 +661,7 @@ func (c *Controller) Delete(w http.ResponseWriter, r *http.Request, model interf
 	// If ownOnly, verify ownership before deletion
 	if ownOnly && !ownsByID(c, model, tokenizedID, userID) {
 		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "record not found"})
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Record not found or access denied."})
 		return
 	}
 

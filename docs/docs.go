@@ -551,7 +551,7 @@ const docTemplate = `{
                         }
                     },
                     "404": {
-                        "description": "Record not found",
+                        "description": "Record not found or access denied.",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -615,7 +615,7 @@ const docTemplate = `{
                         }
                     },
                     "404": {
-                        "description": "Record not found",
+                        "description": "Record not found or access denied.",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
@@ -667,7 +667,7 @@ const docTemplate = `{
                         }
                     },
                     "404": {
-                        "description": "Record not found",
+                        "description": "Record not found or access denied.",
                         "schema": {
                             "$ref": "#/definitions/models.ErrorResponse"
                         }
