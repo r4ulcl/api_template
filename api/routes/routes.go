@@ -147,7 +147,7 @@ func SetupRouter(
 
 	// me endpoints
 	// Me endpoints available to any logged in user
-	authSub.HandleFunc("/me", authController.Me).Methods("GET", "POST")
+	authSub.HandleFunc("/me", authController.Me).Methods("GET", "PATCH")
 
 	// Collect all non-anonymous roles for own access on /me routes
 	allAuthRoles := make([]string, 0, len(models.RolePermissions))

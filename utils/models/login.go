@@ -40,6 +40,7 @@ type User struct {
 // models/api_key.go
 type APIKey struct {
 	Token     string     `gorm:"primaryKey;column:token;size:512" json:"token"`
+	Description  string     `gorm:"column:description" json:"description"`
 	Username  string     `gorm:"column:username;index;not null" json:"username"`
 	Enabled   bool       `gorm:"column:enabled;default:true" json:"enabled"`
 	CreatedAt time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`

@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Me handles GET /me and POST /me
+// Me handles GET /me and PATCH /me
 // @Summary     Get or update current user's profile
 // @Description GET returns the authenticated user's info; POST updates fields like email or password.
 // @Tags        user, auth
@@ -27,22 +27,22 @@ import (
 // @Failure     404   {object} models.ErrorResponse    "User not found"
 // @Failure     500   {object} models.ErrorResponse    "Internal server error"
 // @Router      /me [get]
-// @Router      /me [post]
+// @Router      /me [PATCH]
 // @Router      /me/api-key [post]
 func (ac *AuthController) Me(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method {
 	case http.MethodGet:
 		ac.handleGetUserInfo(w, r)
-	case http.MethodPost:
+	case http.MethodPatch:
 		ac.handleUpdateUserInfo(w, r)
 	default:
-		w.Header().Set("Allow", "GET, POST")
+		w.Header().Set("Allow", "GET, PATCH")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-// handleUpdateUserInfo processes POST /me: update own info (e.g. password, email, etc.)
+// handleUpdateUserInfo processes PATH /me: update own info (e.g. password, email, etc.)
 // @Summary     Update current user's profile
 // @Description Allows the authenticated user to change email and/or password. To change password, both current and new passwords are required.
 // @Tags        user
@@ -54,8 +54,8 @@ func (ac *AuthController) Me(w http.ResponseWriter, r *http.Request) {
 // @Failure     401    {object} models.ErrorResponse    "Unauthorized (invalid current password or token)"
 // @Failure     404    {object} models.ErrorResponse    "User not found"
 // @Failure     500    {object} models.ErrorResponse    "Internal server error"
-// @Router      /me [post]
-// handleUpdateUserInfo processes POST /me: update own info (e.g. password, email, etc.)
+// @Router      /me [PATH]
+// handleUpdateUserInfo processes PATH /me: update own info (e.g. password, email, etc.)
 func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Request) {
 	// 1) Auth context
 	uidVal := r.Context().Value(middlewares.ContextUserID)

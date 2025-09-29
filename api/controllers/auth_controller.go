@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"reflect"
 
 	"github.com/r4ulcl/api_template/api/middlewares"
 	"github.com/r4ulcl/api_template/database"
@@ -43,6 +44,13 @@ func (ac *AuthController) RegisterUser(user *models.User) (*models.User, error) 
 	}
 	user.Password = hashed
 
+	if user.CreatedBy == "" {
+		user.CreatedBy = "SYSTEM"
+	}
+	if user.EditedBy == "" {
+		user.EditedBy = "SYSTEM"
+	}
+
 	// Insert into DB
 	if err := ac.BC.CreateOrUpdateRecord(user, false); err != nil {
 		return nil, err
@@ -51,6 +59,23 @@ func (ac *AuthController) RegisterUser(user *models.User) (*models.User, error) 
 	// Clear out Password before returning
 	user.Password = ""
 	return user, nil
+}
+
+// forceCreatedBy sets CreatedBy if the field exists and we have a non-empty userID.
+func forceCreatedBy(model interface{}, userID string) {
+	if userID == "" {
+		return
+	}
+	v := reflect.ValueOf(model)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if !v.IsValid() {
+		return
+	}
+	if f := v.FieldByName("CreatedBy"); f.IsValid() && f.CanSet() && f.Kind() == reflect.String {
+		f.SetString(userID)
+	}
 }
 
 // Register is the HTTP handler that leverages RegisterUser()
@@ -82,6 +107,13 @@ func (ac *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Pull caller context if present to populate audit fields
+	_, callerUserID := ownOnlyAndUserID(r)
+
+	// Set audit fields on create and lock ownership to the caller when available
+	setAuditOnCreate(&userInput, callerUserID)
+	forceCreatedBy(&userInput, callerUserID)
+
 	createdUser, err := ac.RegisterUser(&userInput)
 	switch err {
 	case nil:
@@ -94,6 +126,12 @@ func (ac *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "User already exists"})
 	default:
+		// Surface duplicate constraint errors consistently as conflicts
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(strings.ToLower(err.Error()), "unique") {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
 	}
