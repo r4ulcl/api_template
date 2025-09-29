@@ -176,6 +176,14 @@ To add a new resource (e.g. a `Product`):
 - [x] Allow insert array of JSON `[{}]`
 - [x] Allow sort `limit=20&page=3&sort=created_at:desc`
 - [x] Allow advanced filters
+- [x] Own permission on each type
+- [x] Default info for GUI send only info with read access for that user
+- [x] CreatedAt, EditedAt, UpdatedBy, CreateBy in all objects, not editable in API
+- [ ] Add groups of users, to see group
+- [ ] Verified email addres
+- [x] Option user to generate API key no expiracy but validated in server
+- [ ] Permission in the database instead of hardcoded?
+- [ ] Security check everything
 
 ---
 
