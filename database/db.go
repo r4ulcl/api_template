@@ -340,47 +340,47 @@ func (bc *BaseController) UpdateRecords(model interface{}, id string) error {
 // Returns:
 // - An error if deletion fails.
 func (bc *BaseController) DeleteRecords(model interface{}, id string) error {
-	parts := strings.Split(id, "-")
+    parts := strings.Split(id, "-")
 
-	pkCols, err := getDBPrimaryKeyColumns(bc.DB, model)
-	if err != nil {
-		return fmt.Errorf("failed to parse schema: %w", err)
-	}
-
-	if len(pkCols) != len(parts) {
+    pkCols, err := getDBPrimaryKeyColumns(bc.DB, model)
+    if err != nil {
+        return fmt.Errorf("failed to parse schema: %w", err)
+    }
+	
+    if len(pkCols) != len(parts) {
 		return fmt.Errorf(
 			"mismatch between primary keys (%d) and tokenized ID parts (%d)",
 			len(pkCols), len(parts),
 		)
-	}
+    }
 
-	// Real execution with verbose logging
-	tx := bc.DB.
-		Session(&gorm.Session{NewDB: true}).
-		Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Info)}).
-		Debug().
-		Model(model)
+    // Resolve table name from schema without using the populated struct as a filter
+    stmt := &gorm.Statement{DB: bc.DB}
+    if err := stmt.Parse(model); err != nil {
+        return fmt.Errorf("failed to parse schema: %w", err)
+    }
 
-	// Dry run to log exact SQL and vars
-	dry := bc.DB.
-		Session(&gorm.Session{NewDB: true, DryRun: true}).
-		Model(model)
+    tx := bc.DB.
+        Session(&gorm.Session{NewDB: true}).
+        Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Info)}).
+        Debug().
+        Table(stmt.Schema.Table) // binds to the table, not to the instance
 
-	for i, col := range pkCols {
-		tx = tx.Where(col+" = ?", parts[i])
-		dry = dry.Where(col+" = ?", parts[i])
-	}
+    // Build only the PK filters you want
+    for i, col := range pkCols {
+        tx = tx.Where(col+" = ?", parts[i])
+    }
 
-	// Execute
-	res := tx.Delete(model)
-	if res.Error != nil {
-		return res.Error
-	}
+    // Do not pass the instance here
+    res := tx.Delete(nil)
+    if res.Error != nil {
+        return res.Error
+    }
 
-	if res.RowsAffected == 0 {
-		return fmt.Errorf("no records deleted for ID %s", id)
-	}
-	return nil
+    if res.RowsAffected == 0 {
+        return fmt.Errorf("no records deleted for ID %s", id)
+    }
+    return nil
 }
 
 // getPrimaryKeyFields extracts the GORM primary key fields from a struct.
