@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/r4ulcl/api_template/api/middlewares"
@@ -54,13 +55,14 @@ func (ac *AuthController) Me(w http.ResponseWriter, r *http.Request) {
 // @Failure     404    {object} models.ErrorResponse    "User not found"
 // @Failure     500    {object} models.ErrorResponse    "Internal server error"
 // @Router      /me [post]
+// handleUpdateUserInfo processes POST /me: update own info (e.g. password, email, etc.)
 func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Request) {
 	// 1) Auth context
 	uidVal := r.Context().Value(middlewares.ContextUserID)
 	rlVal := r.Context().Value(middlewares.ContextRole)
 	currentUsername, _ := uidVal.(string)
 	currentRoleStr, _ := rlVal.(string)
-	if currentUsername == "" {
+	if strings.TrimSpace(currentUsername) == "" {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Unauthorized"})
 		return
@@ -75,35 +77,45 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// 3) Decode twice
-	//    a) into a map to know which fields were provided
-	//    b) into a typed struct for convenient access
+	// 3) Decode body
+	const maxBody = 1 << 20 // 1 MiB
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+
 	var payload map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid JSON"})
 		return
 	}
-	// Reconstruct body for second decode if needed
 	bodyBytes, _ := json.Marshal(payload)
 	var req models.UpdateUser
 	_ = json.Unmarshal(bodyBytes, &req)
 
-	// 4) Get whitelist for caller role
-	allowed, ok := models.UpdateUserWhitelist[currentRole]
-	if !ok {
-		allowed = map[string]bool{}
+	// 4) Disallow username and audit fields for everyone
+	disallowedAlways := map[string]bool{
+		"username":    true,
+		"created_at":  true,
+		"last_update": true,
+		"created_by":  true,
+		"edited_by":   true,
 	}
 
-	// 5) Reject any disallowed fields and block username pivots
-	if _, hasUsername := payload["username"]; hasUsername {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{
-			Error: "cannot update field \"username\" via this endpoint",
-		})
-		return
-	}
+	// 5) Field-level gate
+	allowed := models.UpdateUserWhitelist[currentRole]
+
 	for key := range payload {
+		if disallowedAlways[key] {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
+				Error: fmt.Sprintf("cannot update field %q via this endpoint", key),
+			})
+			return
+		}
+		// Admin can edit anything that is not in disallowedAlways
+		if currentRole == models.AdminRole {
+			continue
+		}
+		// Regular users can only touch password change inputs
 		if !allowed[key] {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
@@ -113,24 +125,46 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	// 6) Apply generic field updates
-	// Email
-	if _, ok := payload["email"]; ok {
-		user.Email = strings.TrimSpace(req.Email)
-	}
-	// EmailVerified
-	if _, ok := payload["email_verified"]; ok {
-		user.EmailVerified = req.EmailVerified
-	}
-	// Role
-	if _, ok := payload["role"]; ok {
-		user.Role = models.Role(strings.TrimSpace(string(req.Role)))
+	// 6) Apply editable fields
+	if currentRole == models.AdminRole {
+		// admin path
+		if _, ok := payload["email"]; ok {
+			user.Email = strings.TrimSpace(req.Email)
+		}
+		if _, ok := payload["email_verified"]; ok {
+			user.EmailVerified = req.EmailVerified
+		}
+		if _, ok := payload["role"]; ok {
+			roleStr := strings.TrimSpace(string(req.Role))
+			switch models.Role(roleStr) {
+			case models.AdminRole, models.UserRole:
+				user.Role = models.Role(roleStr)
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "invalid role value"})
+				return
+			}
+		}
+	} else {
+		// user path
+		if _, ok := payload["email"]; ok {
+			newEmail := strings.TrimSpace(req.Email)
+			if newEmail == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "email cannot be empty"})
+				return
+			}
+			// Only flip verification if the email actually changes
+			if newEmail != user.Email {
+				user.Email = newEmail
+				user.EmailVerified = false
+			}
+		}
 	}
 
 	// 7) Password change
 	if _, ok := payload["new_password"]; ok && strings.TrimSpace(req.NewPassword) != "" {
 		if currentRole == models.AdminRole {
-			// Admin path without current password
 			hashed, err := utils.HashPassword(req.NewPassword)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -139,7 +173,6 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 			}
 			user.Password = hashed
 		} else {
-			// Regular user must provide current password
 			currRaw, hasCurr := payload["password"]
 			currP, _ := currRaw.(string)
 			if !hasCurr || strings.TrimSpace(currP) == "" {
@@ -162,14 +195,54 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	// 8) Persist
-	if err := ac.BC.CreateOrUpdateRecord(&user, false); err != nil {
+	// 8) Persist with UPDATE
+	user.Username = currentUsername
+	user.EditedBy = currentUsername
+	user.LastUpdate = time.Now()
+
+	updates := map[string]interface{}{
+		"edited_by":   user.EditedBy,
+		"last_update": user.LastUpdate,
+	}
+
+	if currentRole == models.AdminRole {
+		if _, ok := payload["email"]; ok {
+			updates["email"] = user.Email
+		}
+		if _, ok := payload["email_verified"]; ok {
+			updates["email_verified"] = user.EmailVerified
+		}
+		if _, ok := payload["role"]; ok {
+			updates["role"] = user.Role
+		}
+	} else {
+		if _, ok := payload["email"]; ok {
+			updates["email"] = user.Email
+			updates["email_verified"] = user.EmailVerified // forced false if changed
+		}
+	}
+
+	if _, ok := payload["new_password"]; ok && strings.TrimSpace(req.NewPassword) != "" {
+		updates["password"] = user.Password
+	}
+
+	if len(updates) == 2 {
+		// only audit changed
+		w.WriteHeader(http.StatusOK)
+		user.Password = ""
+		_ = json.NewEncoder(w).Encode(user)
+		return
+	}
+
+	if err := ac.BC.DB.Model(&models.User{}).
+		Where("username = ?", user.Username).
+		Updates(updates).Error; err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	// 9) Return sanitized user
+	// return sanitized
 	user.Password = ""
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(user)

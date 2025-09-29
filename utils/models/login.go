@@ -54,27 +54,17 @@ type UpdateUser struct {
 	NewPassword string `json:"new_password" example:"new_password"`
 }
 
-// UpdateUserWhitelist defines which JSON fields are accepted per role for the update endpoint.
-// Important: "username" is intentionally not allowed here. Handle renames in a dedicated endpoint.
+// UpdateUserWhitelist defines which JSON fields are accepted per role.
 var UpdateUserWhitelist = map[Role]map[string]bool{
 	UserRole: {
-		// inputs
-		"password":     true, // current password for self changes
+		"password":     true, // current password input
 		"new_password": true,
-
-		// self-editable profile fields
-		"email": true,
-		// add more self-editable fields if needed
+		"email":        true, // allow users to change email
 	},
 	AdminRole: {
-		// admin can set new password without current password
 		"new_password":   true,
 		"role":           true,
 		"email":          true,
 		"email_verified": true,
-		"api_keys":       true,
-		// add more admin-editable fields if needed
-
-		// note: "password" (current) is not required for admin
 	},
 }

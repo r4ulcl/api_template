@@ -167,9 +167,9 @@ To add a new resource (e.g. a `Product`):
 
 ## Roadmap
 
-- [ ] User manage section, get info, change password, etc. Rol user too
-   - [ ] Change password
-   - [ ] Get user info
+- [x] User manage section, get info, change password, etc. Rol user too
+   - [x] Change password
+   - [x] Get user info
 - [x] Bool in .env to swagger
 - [x] Paginate API
 - [x] Filters in GET
