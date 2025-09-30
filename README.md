@@ -1,4 +1,4 @@
-# api\_template
+# api_template
 
 A **Go REST API** with MySQL database support, featuring **dynamic API endpoints**, **role-based security**, **auto migrations**, and **Swagger documentation**. The project is containerized using **Docker** and orchestrated with **Docker Compose** for a seamless development and deployment workflow.
 
@@ -11,6 +11,15 @@ A **Go REST API** with MySQL database support, featuring **dynamic API endpoints
 * **Auto migrations** with GORM
 * **Swagger UI** ready to go
 * **Containerized** (Docker + Compose)
+* **User management** including getting user info and changing passwords
+* **Configurable Swagger** visibility via `.env`
+* **Paginated API** responses
+* **Advanced filtering** and **sorting** support (`limit`, `page`, `sort`, operators)
+* **Bulk inserts** using JSON arrays `[{}]`
+* **Custom permissions per model type**
+* **GUI-ready API responses** filtered by user access level
+* **Automatic CreatedAt, EditedAt, UpdatedBy, CreatedBy** fields on all objects (not editable)
+* **User API key generation** (no expiration, validated on server)
 
 ---
 
@@ -82,32 +91,32 @@ api_template/
 │   └── routes/
 │       └── routes.go            # Dynamic route registration
 ├── database/
-│   └── database.go          # GORM connection, retries, auto-migrate
+│   └── database.go              # GORM connection, retries, auto-migrate
 ├── utils/
-│   ├── config.go            # .env loader & DSN constructor
-│   ├── auth.go              # Password hashing & JWT utils
-│   └── models/              # GORM models & DTOs
-│       ├── api.go           # LoginRequest, RegisterRequest, JWTResponse, ErrorResponse
-│       ├── database.go      # Example1, Example2, ExampleRelational structs
-│       ├── login.go         # User model & Role enum
-│       └── permissions.go   # RolePermissions & ModelMap
+│   ├── config.go                # .env loader & DSN constructor
+│   ├── auth.go                  # Password hashing & JWT utils
+│   └── models/                  # GORM models & DTOs
+│       ├── api.go               # LoginRequest, RegisterRequest, JWTResponse, ErrorResponse
+│       ├── database.go          # Example1, Example2, ExampleRelational structs
+│       ├── login.go             # User model & Role enum
+│       └── permissions.go       # RolePermissions & ModelMap
 ├── docs/
-│   ├── docs.go              # Swagger annotations
-│   ├── swagger.json         # Generated OpenAPI spec (JSON)
-│   └── swagger.yaml         # Generated OpenAPI spec (YAML)
-├── .env.example             # Sample environment variables
-├── Dockerfile               # Container build instructions
-├── docker-compose.yml       # Compose setup for DB + API
-├── main.go                  # Application entry point
-├── go.mod                   # Module path & dependencies
-└── go.sum                   # Dependency checksums
+│   ├── docs.go                  # Swagger annotations
+│   ├── swagger.json             # Generated OpenAPI spec (JSON)
+│   └── swagger.yaml             # Generated OpenAPI spec (YAML)
+├── .env.example                 # Sample environment variables
+├── Dockerfile                   # Container build instructions
+├── docker-compose.yml           # Compose setup for DB + API
+├── main.go                      # Application entry point
+├── go.mod                       # Module path & dependencies
+└── go.sum                       # Dependency checksums
 ```
 
 ---
 
 ## Adding Your Own Data Models
 
-To add a new resource (e.g. a `Product`):
+To add a new resource (for example a `Product`):
 
 1. **Create the model** in `utils/models/product.go`
 
@@ -126,7 +135,8 @@ To add a new resource (e.g. a `Product`):
      UpdatedAt   time.Time `json:"updated_at"`
    }
    ```
-2. **Register resource & permissions**
+
+2. **Register resource and permissions**
    In `utils/models/permissions.go`, add `"product"` to each appropriate permissions slice and to `ModelMap`:
 
    ```diff
@@ -144,13 +154,13 @@ To add a new resource (e.g. a `Product`):
    }
    ```
 
-4. **Rebuild & restart**
+3. **Rebuild and restart**
 
    ```bash
    docker-compose up --build
    ```
 
-5. **Test the endpoints**
+4. **Test the endpoints**
 
    ```bash
    # List products
@@ -167,23 +177,24 @@ To add a new resource (e.g. a `Product`):
 
 ## Roadmap
 
-- [x] User manage section, get info, change password, etc. Rol user too
-   - [x] Change password
-   - [x] Get user info
-- [x] Bool in .env to swagger
-- [x] Paginate API
-- [x] Filters in GET
-- [x] Allow insert array of JSON `[{}]`
-- [x] Allow sort `limit=20&page=3&sort=created_at:desc`
-- [x] Allow advanced filters
-- [x] Own permission on each type
-- [x] Default info for GUI send only info with read access for that user
-- [x] CreatedAt, EditedAt, UpdatedBy, CreateBy in all objects, not editable in API
-- [ ] Add groups of users, to see group
-- [ ] Verified email addres
-- [x] Option user to generate API key no expiracy but validated in server
-- [ ] Permission in the database instead of hardcoded?
-- [ ] Security check everything
+* [x] User manage section, get info, change password, etc. Rol user too
+  * [x] Change password
+  * [x] Get user info
+* [x] Bool in .env to swagger
+* [x] Paginate API
+* [x] Filters in GET
+* [x] Allow insert array of JSON `[{}]`
+* [x] Allow sort `limit=20&page=3&sort=created_at:desc`
+* [x] Allow advanced filters
+* [x] Own permission on each type
+* [x] Default info for GUI send only info with read access for that user
+* [x] CreatedAt, EditedAt, UpdatedBy, CreateBy in all objects, not editable in API
+* [ ] Add user groups with shared permissions and visibility scopes
+* [ ] Implement email verification on registration and password reset
+* [x] Option user to generate API key no expiracy but validated in server
+* [ ] Security check everything
+* [x] Integrate audit logging for all CRUD operations
+* [ ] Add rate limiting and IP allowlist / denylist
 
 ---
 
@@ -195,6 +206,6 @@ Distributed under the **MIT License**. See `LICENSE` for details.
 
 ## Maintainer
 
-**r4ulcl** – [github.com/r4ulcl](https://github.com/r4ulcl)
+**r4ulcl** [github.com/r4ulcl](https://github.com/r4ulcl)
 
 Have suggestions or found a bug? Please open an issue or submit a pull request!

@@ -1,9 +1,6 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  # ----------------------------------------------------------
-  # MySQL Database Service
-  # ----------------------------------------------------------
   db:
     image: mysql:8.0
     container_name: mysql_db
@@ -14,11 +11,10 @@ services:
     volumes:
       - ./mysql_data:/var/lib/mysql
 
-  # ----------------------------------------------------------
-  # Go Application Service
-  # ----------------------------------------------------------
   app:
-    build: .
+    build:
+      context: .
+      target: runner
     container_name: go_app
     restart: always
     env_file: .env
@@ -26,3 +22,4 @@ services:
       - db
     ports:
       - "7080:8080"
+      
