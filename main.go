@@ -73,7 +73,7 @@ func main() {
 	}
 
 	// Build the router (this already installs CORSMethodMiddleware internally)
-	r := routes.SetupRouter(controller, authController, cfg.JWTSecret, cfg.PublicRegister, cfg.UserGUI, cfg.Swagger)
+	r := routes.SetupRouter(controller, authController, cfg.JWTSecret, cfg.PublicRegister, cfg.UserGUI, cfg.Swagger, cfg.ReadLog)
 
 	// Wrap the router in gorilla/handlers.CORS so that:
 	// 1) every response (including auto‐OPTIONS) carries the CORS headers, and

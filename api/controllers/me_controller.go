@@ -15,6 +15,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// helper to mask sensitive user fields for audit logs
+func sanitizeUserForAudit(u models.User) models.User {
+	u.Password = ""
+	// API keys are not embedded in User, so nothing else to redact here
+	return u
+}
+
 // Me handles GET /me and PATCH /me
 // @Summary     Get or update current user's profile
 // @Description GET returns the authenticated user's info; POST updates fields like email or password.
@@ -65,6 +72,7 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 	if strings.TrimSpace(currentUsername) == "" {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Unauthorized"})
+		logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusUnauthorized, nil)
 		return
 	}
 	currentRole := models.Role(currentRoleStr)
@@ -74,8 +82,10 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 	if err := ac.BC.GetRecordsByID(&user, currentUsername); err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "User not found"})
+		logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusNotFound, nil)
 		return
 	}
+	before := sanitizeUserForAudit(user)
 
 	// 3) Decode body
 	const maxBody = 1 << 20 // 1 MiB
@@ -85,6 +95,7 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid JSON"})
+		logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
 		return
 	}
 	bodyBytes, _ := json.Marshal(payload)
@@ -109,6 +120,7 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
 				Error: fmt.Sprintf("cannot update field %q via this endpoint", key),
 			})
+			logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
 			return
 		}
 		// Admin can edit anything that is not in disallowedAlways
@@ -121,6 +133,7 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{
 				Error: fmt.Sprintf("cannot update field %q", key),
 			})
+			logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
 			return
 		}
 	}
@@ -142,6 +155,7 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 			default:
 				w.WriteHeader(http.StatusBadRequest)
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "invalid role value"})
+				logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
 				return
 			}
 		}
@@ -152,6 +166,7 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 			if newEmail == "" {
 				w.WriteHeader(http.StatusBadRequest)
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "email cannot be empty"})
+				logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
 				return
 			}
 			// Only flip verification if the email actually changes
@@ -169,6 +184,7 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "failed to hash new password"})
+				logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusInternalServerError, &auditChange{Before: before})
 				return
 			}
 			user.Password = hashed
@@ -178,17 +194,20 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 			if !hasCurr || strings.TrimSpace(currP) == "" {
 				w.WriteHeader(http.StatusBadRequest)
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "current password required"})
+				logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
 				return
 			}
 			if err := utils.CheckPassword(user.Password, currP); err != nil {
 				w.WriteHeader(http.StatusUnauthorized)
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "current password incorrect"})
+				logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusUnauthorized, &auditChange{Before: before})
 				return
 			}
 			hashed, err := utils.HashPassword(req.NewPassword)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "failed to hash new password"})
+				logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusInternalServerError, &auditChange{Before: before})
 				return
 			}
 			user.Password = hashed
@@ -227,10 +246,14 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 	}
 
 	if len(updates) == 2 {
-		// only audit changed
+		// nothing changed beyond audit fields
 		w.WriteHeader(http.StatusOK)
 		user.Password = ""
 		_ = json.NewEncoder(w).Encode(user)
+		logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusOK, &auditChange{
+			Before: before,
+			After:  sanitizeUserForAudit(user),
+		})
 		return
 	}
 
@@ -239,6 +262,7 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 		Updates(updates).Error; err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusInternalServerError, &auditChange{Before: before})
 		return
 	}
 
@@ -246,6 +270,10 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 	user.Password = ""
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(user)
+	logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusOK, &auditChange{
+		Before: before,
+		After:  sanitizeUserForAudit(user),
+	})
 }
 
 // @Summary     Authenticate user via query params (GET)
@@ -265,6 +293,7 @@ func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Reque
 	if !ok || username == "" {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Unauthorized: no user in context"})
+		logAudit(&Controller{BC: ac.BC}, r, "", "read", "users", "", http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -273,6 +302,7 @@ func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Reque
 	if err := ac.BC.GetRecordsByID(&user, username); err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "User not found"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "read", "users", username, http.StatusNotFound, nil)
 		return
 	}
 
@@ -281,6 +311,7 @@ func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Reque
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(user)
+	logAudit(&Controller{BC: ac.BC}, r, username, "read", "users", username, http.StatusOK, nil)
 }
 
 // handleGenerateAPIKey processes POST /me/api-key: generate a new permanent API key
@@ -311,6 +342,7 @@ func (ac *AuthController) GenerateAPIKey(w http.ResponseWriter, r *http.Request)
 	if username == "" {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Unauthorized"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "create_api_key", "api_keys", "", http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -321,6 +353,7 @@ func (ac *AuthController) GenerateAPIKey(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Failed to generate API key"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "create_api_key", "api_keys", "", http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -329,15 +362,24 @@ func (ac *AuthController) GenerateAPIKey(w http.ResponseWriter, r *http.Request)
 	case err == nil:
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]string{"api_key": token})
+		// only store masked token in audit logs
+		masked := ""
+		if len(token) > 12 {
+			masked = token[:8] + "...(masked)"
+		}
+		logAudit(&Controller{BC: ac.BC}, r, username, "create_api_key", "api_keys", masked, http.StatusCreated, nil)
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "User not found"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "create_api_key", "api_keys", "", http.StatusNotFound, nil)
 	case strings.Contains(err.Error(), "Duplicate entry"):
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Duplicate API key"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "create_api_key", "api_keys", "", http.StatusConflict, nil)
 	default:
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		logAudit(&Controller{BC: ac.BC}, r, username, "create_api_key", "api_keys", "", http.StatusInternalServerError, nil)
 	}
 }
 
@@ -383,6 +425,7 @@ func (ac *AuthController) DeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 	if username == "" {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Unauthorized"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "revoke_api_key", "api_keys", "", http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -390,6 +433,7 @@ func (ac *AuthController) DeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 	if apiKey == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Missing apiKey in path"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "revoke_api_key", "api_keys", "", http.StatusBadRequest, nil)
 		return
 	}
 
@@ -398,12 +442,19 @@ func (ac *AuthController) DeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 	case err == nil:
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]bool{"revoked": true})
+		masked := ""
+		if len(apiKey) > 8 {
+			masked = apiKey[:4] + "...(masked)"
+		}
+		logAudit(&Controller{BC: ac.BC}, r, username, "revoke_api_key", "api_keys", masked, http.StatusOK, nil)
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "API key not found"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "revoke_api_key", "api_keys", "", http.StatusNotFound, nil)
 	default:
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		logAudit(&Controller{BC: ac.BC}, r, username, "revoke_api_key", "api_keys", "", http.StatusInternalServerError, nil)
 	}
 }
 

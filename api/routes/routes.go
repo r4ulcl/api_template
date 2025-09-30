@@ -26,6 +26,7 @@ func registerCRUD(
 	fullRoles []string, // roles with full access
 	ownRoles []string, // roles limited to own data
 	overwrite bool, // only used for PUT
+	readLog bool, // to log READ requests
 ) {
 	base := "/" + resource
 	item := base + "/{id}"
@@ -49,13 +50,13 @@ func registerCRUD(
 		list := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// *([]T)
 			slicePtr := reflect.New(reflect.SliceOf(elem)).Interface()
-			baseController.GetAll(w, r, slicePtr)
+			baseController.GetAll(w, r, slicePtr, readLog)
 		})
 
 		byID := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// *T (never **T)
 			instancePtr := reflect.New(elem).Interface()
-			baseController.GetByID(w, r, instancePtr)
+			baseController.GetByID(w, r, instancePtr, readLog)
 		})
 
 		router.Handle(base, wrap(list)).Methods("GET")
@@ -106,7 +107,7 @@ func SetupRouter(
 	baseController *controllers.Controller,
 	authController *controllers.AuthController,
 	jwtSecret string,
-	publicRegister, userGUI, swagger bool,
+	publicRegister, userGUI, swagger, readLog bool,
 ) *mux.Router {
 	r := mux.NewRouter()
 	r.Use(mux.CORSMethodMiddleware(r))
@@ -126,19 +127,19 @@ func SetupRouter(
 	anon := models.RolePermissions["anonymous"]
 
 	for _, res := range anon.Get {
-		registerCRUD(r, baseController, authController, "GET", res, models.ModelMap[res], nil, nil, false)
+		registerCRUD(r, baseController, authController, "GET", res, models.ModelMap[res], nil, nil, false, readLog)
 	}
 	for _, res := range anon.Post {
-		registerCRUD(r, baseController, authController, "POST", res, models.ModelMap[res], nil, nil, false)
+		registerCRUD(r, baseController, authController, "POST", res, models.ModelMap[res], nil, nil, false, readLog)
 	}
 	for _, res := range anon.Put {
-		registerCRUD(r, baseController, authController, "PUT", res, models.ModelMap[res], nil, nil, true)
+		registerCRUD(r, baseController, authController, "PUT", res, models.ModelMap[res], nil, nil, true, readLog)
 	}
 	for _, res := range anon.Patch {
-		registerCRUD(r, baseController, authController, "PATCH", res, models.ModelMap[res], nil, nil, false)
+		registerCRUD(r, baseController, authController, "PATCH", res, models.ModelMap[res], nil, nil, false, readLog)
 	}
 	for _, res := range anon.Delete {
-		registerCRUD(r, baseController, authController, "DELETE", res, models.ModelMap[res], nil, nil, false)
+		registerCRUD(r, baseController, authController, "DELETE", res, models.ModelMap[res], nil, nil, false, readLog)
 	}
 
 	// ---------- 2. Authenticated resources ----------
@@ -266,19 +267,19 @@ func SetupRouter(
 
 	// Register every method/resource on authSub with both role sets
 	for res, rs := range methodRoles["GET"] {
-		registerCRUD(authSub, baseController, authController, "GET", res, models.ModelMap[res], rs.full, rs.own, false)
+		registerCRUD(authSub, baseController, authController, "GET", res, models.ModelMap[res], rs.full, rs.own, false, readLog)
 	}
 	for res, rs := range methodRoles["POST"] {
-		registerCRUD(authSub, baseController, authController, "POST", res, models.ModelMap[res], rs.full, rs.own, false)
+		registerCRUD(authSub, baseController, authController, "POST", res, models.ModelMap[res], rs.full, rs.own, false, readLog)
 	}
 	for res, rs := range methodRoles["PUT"] {
-		registerCRUD(authSub, baseController, authController, "PUT", res, models.ModelMap[res], rs.full, rs.own, true)
+		registerCRUD(authSub, baseController, authController, "PUT", res, models.ModelMap[res], rs.full, rs.own, true, readLog)
 	}
 	for res, rs := range methodRoles["PATCH"] {
-		registerCRUD(authSub, baseController, authController, "PATCH", res, models.ModelMap[res], rs.full, rs.own, false)
+		registerCRUD(authSub, baseController, authController, "PATCH", res, models.ModelMap[res], rs.full, rs.own, false, readLog)
 	}
 	for res, rs := range methodRoles["DELETE"] {
-		registerCRUD(authSub, baseController, authController, "DELETE", res, models.ModelMap[res], rs.full, rs.own, false)
+		registerCRUD(authSub, baseController, authController, "DELETE", res, models.ModelMap[res], rs.full, rs.own, false, readLog)
 	}
 
 	// ---------- 3. /stats endpoint ----------

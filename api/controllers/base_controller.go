@@ -115,6 +115,9 @@ func logAudit(c *Controller, r *http.Request, actorID string, action string, res
 		RequestID:  getRequestID(r),
 		Changes:    changesJSON,
 		CreatedAt:  time.Now(),
+		LastUpdate: time.Now(),
+		CreatedBy:  actorID,
+		EditedBy:   actorID,
 	}
 
 	if err := c.BC.DB.Create(&entry).Error; err != nil {
@@ -439,7 +442,7 @@ type paginationLinks struct {
 // @Failure     400         {object}  models.ErrorResponse "Invalid query parameters"
 // @Failure     500         {object}  models.ErrorResponse "Internal server error"
 // @Router      /{resource} [get]
-func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interface{}) {
+func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interface{}, readLog bool) {
 	w.Header().Set("Content-Type", "application/json")
 
 	vars := mux.Vars(r)
@@ -633,7 +636,9 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 	_ = json.NewEncoder(w).Encode(resp)
 
 	// Audit a list read with no specific ResourceID
-	logAudit(c, r, userID, "read", resource, "", http.StatusOK, nil)
+	if readLog {
+		logAudit(c, r, userID, "read", resource, "", http.StatusOK, nil)
+	}
 }
 
 // copyQueryExcluding returns a copy of url.Values without the specified keys.
@@ -670,7 +675,7 @@ func copyQueryExcluding(src url.Values, keysToSkip []string) url.Values {
 // @Failure     404        {object}  models.ErrorResponse "Record not found or access denied."
 // @Failure     500        {object}  models.ErrorResponse "Internal server error"
 // @Router      /{resource}/{id} [get]
-func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model interface{}) {
+func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model interface{}, readLog bool) {
 	w.Header().Set("Content-Type", "application/json")
 
 	vars := mux.Vars(r)
@@ -704,7 +709,9 @@ func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model inter
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(model)
 
-	logAudit(c, r, userID, "read", resource, tokenizedID, http.StatusOK, nil)
+	if readLog {
+		logAudit(c, r, userID, "read", resource, tokenizedID, http.StatusOK, nil)
+	}
 }
 
 // ------------------------------------------------------------------

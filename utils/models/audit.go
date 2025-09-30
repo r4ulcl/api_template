@@ -16,6 +16,11 @@ type AuditLog struct {
 	UserAgent string `gorm:"size:255" json:"user_agent"`
 	RequestID string `gorm:"size:64;index" json:"request_id"`
 	// payload changes captured as JSON
-	Changes   string    `gorm:"type:json" json:"changes"`
-	CreatedAt time.Time `json:"created_at"`
+	Changes string `gorm:"type:json" json:"changes"`
+
+	// Audit
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	LastUpdate time.Time `gorm:"column:last_update;autoUpdateTime" json:"last_update"`
+	CreatedBy  string    `gorm:"column:created_by" json:"created_by"`
+	EditedBy   string    `gorm:"column:edited_by" json:"edited_by"`
 }

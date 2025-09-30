@@ -18,6 +18,7 @@ type Config struct {
 	PublicRegister bool   // Register without auth
 	UserGUI        bool   // Allow user to access stats
 	Swagger        bool   // Enable swagger endpoint
+	ReadLog        bool
 }
 
 // getEnv fetches an environment variable or returns the provided default value.
@@ -55,6 +56,7 @@ func LoadConfig() *Config {
 		PublicRegister: getEnvAsBool("PUBLIC_REGISTER", false),      // Default: false
 		UserGUI:        getEnvAsBool("USER_GUI", false),             // Default: false
 		Swagger:        getEnvAsBool("SWAGGER", false),              // Default: false
+		ReadLog:        getEnvAsBool("READLOG", false),              // Default: false
 	}
 }
 

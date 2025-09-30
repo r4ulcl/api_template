@@ -79,16 +79,16 @@ var ReviewerDeleteResourcesOwn = []string{}
 var AdminGetResources = []string{"auditLog", "user", "example1", "example2", "exampleRelational"}
 var AdminGetResourcesOwn = []string{}
 
-var AdminPostResources = []string{"auditLog", "user", "example1", "example2", "exampleRelational"}
+var AdminPostResources = []string{"user", "example1", "example2", "exampleRelational"}
 var AdminPostResourcesOwn = []string{}
 
-var AdminPutResources = []string{"auditLog", "user", "example1", "example2", "exampleRelational"}
+var AdminPutResources = []string{"user", "example1", "example2", "exampleRelational"}
 var AdminPutResourcesOwn = []string{}
 
-var AdminPatchResources = []string{"auditLog", "user", "example1", "example2", "exampleRelational"}
+var AdminPatchResources = []string{"user", "example1", "example2", "exampleRelational"}
 var AdminPatchResourcesOwn = []string{}
 
-var AdminDeleteResources = []string{"auditLog", "user", "example1", "example2", "exampleRelational"}
+var AdminDeleteResources = []string{"user", "example1", "example2", "exampleRelational"}
 var AdminDeleteResourcesOwn = []string{}
 
 /* -------------------------------------------------------------------------- */

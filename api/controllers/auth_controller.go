@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"reflect"
+	"strings"
 
 	"github.com/r4ulcl/api_template/api/middlewares"
 	"github.com/r4ulcl/api_template/database"
@@ -31,7 +31,7 @@ var (
 //  1. The newly created user (without the raw password).
 //  2. An error if something went wrong.
 func (ac *AuthController) RegisterUser(user *models.User) (*models.User, error) {
-	// Trim & validate
+	// Trim and validate
 	user.Username = strings.TrimSpace(user.Username)
 	if user.Username == "" || user.Password == "" {
 		return nil, errInvalidInput
@@ -104,6 +104,8 @@ func (ac *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&userInput); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid input JSON"})
+		// audit bad request
+		logAudit(&Controller{BC: ac.BC}, r, "", "create", "users", "", http.StatusBadRequest, nil)
 		return
 	}
 
@@ -119,21 +121,29 @@ func (ac *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 	case nil:
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(createdUser)
+		// audit success
+		logAudit(&Controller{BC: ac.BC}, r, callerUserID, "create", "users", createdUser.Username, http.StatusCreated, &auditChange{
+			After: createdUser,
+		})
 	case errInvalidInput:
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Username and password cannot be empty"})
+		logAudit(&Controller{BC: ac.BC}, r, callerUserID, "create", "users", "", http.StatusBadRequest, nil)
 	case errUserAlreadyExists:
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "User already exists"})
+		logAudit(&Controller{BC: ac.BC}, r, callerUserID, "create", "users", userInput.Username, http.StatusConflict, nil)
 	default:
 		// Surface duplicate constraint errors consistently as conflicts
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(strings.ToLower(err.Error()), "unique") {
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+			logAudit(&Controller{BC: ac.BC}, r, callerUserID, "create", "users", userInput.Username, http.StatusConflict, nil)
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		logAudit(&Controller{BC: ac.BC}, r, callerUserID, "create", "users", userInput.Username, http.StatusInternalServerError, nil)
 	}
 }
 
@@ -173,6 +183,7 @@ func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid input"})
+		logAudit(&Controller{BC: ac.BC}, r, "", "login", "auth", "", http.StatusBadRequest, nil)
 		return
 	}
 
@@ -180,6 +191,7 @@ func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if input.Username == "" || input.Password == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Username and password cannot be empty"})
+		logAudit(&Controller{BC: ac.BC}, r, input.Username, "login", "auth", input.Username, http.StatusBadRequest, nil)
 		return
 	}
 
@@ -189,6 +201,7 @@ func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid username or password"})
+		logAudit(&Controller{BC: ac.BC}, r, input.Username, "login", "auth", input.Username, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -196,6 +209,7 @@ func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err := utils.CheckPassword(user.Password, input.Password); err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid username or password"})
+		logAudit(&Controller{BC: ac.BC}, r, input.Username, "login", "auth", input.Username, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -204,11 +218,14 @@ func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Failed to generate token"})
+		logAudit(&Controller{BC: ac.BC}, r, user.Username, "login", "auth", user.Username, http.StatusInternalServerError, nil)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
+	// success audit
+	logAudit(&Controller{BC: ac.BC}, r, user.Username, "login", "auth", user.Username, http.StatusOK, nil)
 }
 
 // @Summary     Renew token via PUT
@@ -231,6 +248,7 @@ func (ac *AuthController) handleRenewToken(w http.ResponseWriter, r *http.Reques
 	if !ok1 || username == "" || !ok2 || role == "" {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized: missing user or role in context"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "renew_token", "auth", username, http.StatusUnauthorized, nil)
 		return
 	}
 
@@ -239,9 +257,11 @@ func (ac *AuthController) handleRenewToken(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to generate new token"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "renew_token", "auth", username, http.StatusInternalServerError, nil)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"token": newTokenString})
+	logAudit(&Controller{BC: ac.BC}, r, username, "renew_token", "auth", username, http.StatusOK, nil)
 }
