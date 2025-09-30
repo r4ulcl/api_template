@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/r4ulcl/api_template/api/middlewares"
 	"github.com/r4ulcl/api_template/database"
@@ -29,6 +30,98 @@ type Controller struct {
 }
 
 const ownerColumn = "created_by"
+
+// ------------------------------------------------------------------
+// Audit helpers
+// ------------------------------------------------------------------
+
+// getRequestID returns an existing X-Request-ID or generates one.
+func getRequestID(r *http.Request) string {
+	rid := r.Header.Get("X-Request-ID")
+	if rid == "" {
+		rid = uuid.NewString()
+	}
+	return rid
+}
+
+// getClientIP tries common headers and falls back to RemoteAddr.
+// If you run behind a proxy, terminate or sanitize X-Forwarded-For at the edge.
+func getClientIP(r *http.Request) string {
+	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
+		parts := strings.Split(ip, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		return ip
+	}
+	return r.RemoteAddr
+}
+
+// getIDString returns the value of a struct field named ID as a string.
+// Works with string or numeric IDs. Returns empty string if not found.
+func getIDString(model interface{}) string {
+	v := reflect.ValueOf(model)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return ""
+	}
+	f := v.FieldByName("ID")
+	if !f.IsValid() {
+		return ""
+	}
+	switch f.Kind() {
+	case reflect.String:
+		return f.String()
+	case reflect.Uint, reflect.Uint64, reflect.Uint32, reflect.Uint16, reflect.Uint8:
+		return fmt.Sprintf("%d", f.Uint())
+	case reflect.Int, reflect.Int64, reflect.Int32, reflect.Int16, reflect.Int8:
+		return fmt.Sprintf("%d", f.Int())
+	default:
+		return ""
+	}
+}
+
+// Always import "encoding/json" and "log"
+
+type auditChange struct {
+	Before interface{} `json:"before,omitempty"`
+	After  interface{} `json:"after,omitempty"`
+}
+
+func logAudit(c *Controller, r *http.Request, actorID string, action string, resource string, resourceID string, status int, changes *auditChange) {
+	changesJSON := "null" // valid JSON literal
+
+	if changes != nil {
+		if b, err := json.Marshal(changes); err == nil && len(b) > 0 {
+			changesJSON = string(b)
+		} else {
+			// keep "null" if marshal fails or is empty
+			changesJSON = "null"
+		}
+	}
+
+	entry := models.AuditLog{
+		ActorID:    actorID,
+		Action:     action,
+		Resource:   resource,
+		ResourceID: resourceID,
+		Path:       r.URL.Path,
+		Method:     r.Method,
+		Status:     status,
+		IP:         getClientIP(r),
+		UserAgent:  r.UserAgent(),
+		RequestID:  getRequestID(r),
+		Changes:    changesJSON,
+		CreatedAt:  time.Now(),
+	}
+
+	if err := c.BC.DB.Create(&entry).Error; err != nil {
+		// Do not fail the request if audit logging fails
+		log.Printf("audit log failed: %v", err)
+	}
+}
 
 // ------------------------------------------------------------------
 // Helpers for ownership and audit fields
@@ -160,6 +253,9 @@ func ownsByID(c *Controller, model interface{}, tokenizedID string, userID strin
 func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interface{}, overwrite bool) {
 	w.Header().Set("Content-Type", "application/json")
 
+	vars := mux.Vars(r)
+	resource := vars["resource"]
+
 	_, userID := ownOnlyAndUserID(r)
 
 	// 1) Read raw body to detect if it's an array or single object
@@ -227,11 +323,23 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 			if strings.Contains(tx.Error.Error(), "duplicate") {
 				w.WriteHeader(http.StatusConflict)
 				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: tx.Error.Error()})
+				// Audit conflict
+				logAudit(c, r, userID, "create", resource, "", http.StatusConflict, nil)
 				return
 			}
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: tx.Error.Error()})
+			// Audit error
+			logAudit(c, r, userID, "create", resource, "", http.StatusInternalServerError, nil)
 			return
+		}
+
+		// Audit each created element
+		for i := 0; i < slice.Len(); i++ {
+			elem := slice.Index(i).Interface()
+			rid := getIDString(elem)
+			ch := &auditChange{After: elem}
+			logAudit(c, r, userID, "create", resource, rid, http.StatusCreated, ch)
 		}
 
 		w.WriteHeader(http.StatusCreated)
@@ -245,10 +353,12 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 		w.WriteHeader(http.StatusBadRequest)
 		log.Println("r.Body", r.Body)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid JSON object: " + err.Error()})
+		// Audit bad request
+		logAudit(c, r, userID, "create", resource, "", http.StatusBadRequest, nil)
 		return
 	}
 
-	// Set audit fields and enforce ownership if ownOnly
+	// Set audit fields and enforce ownership
 	setAuditOnCreate(model, userID)
 	// Force CreatedBy to current user for safety
 	if v := reflect.ValueOf(model); v.IsValid() {
@@ -268,12 +378,17 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 		if strings.Contains(err.Error(), "duplicate") {
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+			logAudit(c, r, userID, "create", resource, "", http.StatusConflict, nil)
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		logAudit(c, r, userID, "create", resource, "", http.StatusInternalServerError, nil)
 		return
 	}
+
+	rid := getIDString(model)
+	logAudit(c, r, userID, "create", resource, rid, http.StatusCreated, &auditChange{After: model})
 
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(model)
@@ -326,6 +441,9 @@ type paginationLinks struct {
 // @Router      /{resource} [get]
 func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	resource := vars["resource"]
 
 	ownOnly, userID := ownOnlyAndUserID(r)
 
@@ -441,6 +559,8 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 	if err := countDB.Count(&totalItems).Error; err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		// Audit error
+		logAudit(c, r, userID, "read", resource, "", http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -457,6 +577,7 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 	if err := dataDB.Find(model).Error; err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		logAudit(c, r, userID, "read", resource, "", http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -510,6 +631,9 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+
+	// Audit a list read with no specific ResourceID
+	logAudit(c, r, userID, "read", resource, "", http.StatusOK, nil)
 }
 
 // copyQueryExcluding returns a copy of url.Values without the specified keys.
@@ -550,6 +674,7 @@ func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model inter
 	w.Header().Set("Content-Type", "application/json")
 
 	vars := mux.Vars(r)
+	resource := vars["resource"]
 	tokenizedID := vars["id"]
 
 	ownOnly, userID := ownOnlyAndUserID(r)
@@ -559,10 +684,12 @@ func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model inter
 		if strings.Contains(err.Error(), "Record not found or access denied.") {
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+			logAudit(c, r, userID, "read", resource, tokenizedID, http.StatusNotFound, nil)
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		logAudit(c, r, userID, "read", resource, tokenizedID, http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -570,11 +697,14 @@ func (c *Controller) GetByID(w http.ResponseWriter, r *http.Request, model inter
 	if ownOnly && !hasOwnership(model, userID) {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Record not found or access denied."})
+		logAudit(c, r, userID, "read", resource, tokenizedID, http.StatusNotFound, nil)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(model)
+
+	logAudit(c, r, userID, "read", resource, tokenizedID, http.StatusOK, nil)
 }
 
 // ------------------------------------------------------------------
@@ -599,6 +729,7 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 	w.Header().Set("Content-Type", "application/json")
 
 	vars := mux.Vars(r)
+	resource := vars["resource"]
 	tokenizedID := vars["id"]
 
 	ownOnly, userID := ownOnlyAndUserID(r)
@@ -607,12 +738,24 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 	if ownOnly && !ownsByID(c, model, tokenizedID, userID) {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Record not found or access denied."})
+		logAudit(c, r, userID, "update", resource, tokenizedID, http.StatusNotFound, nil)
+		return
+	}
+
+	// Load "before" state
+	before := reflect.New(reflect.TypeOf(model).Elem()).Interface()
+	if err := c.BC.GetRecordsByID(before, tokenizedID); err != nil {
+		// Could not load before
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Record not found or access denied."})
+		logAudit(c, r, userID, "update", resource, tokenizedID, http.StatusNotFound, nil)
 		return
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(model); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		logAudit(c, r, userID, "update", resource, tokenizedID, http.StatusBadRequest, nil)
 		return
 	}
 
@@ -623,11 +766,22 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 		if strings.Contains(err.Error(), "Record not found or access denied.") {
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+			logAudit(c, r, userID, "update", resource, tokenizedID, http.StatusNotFound, &auditChange{Before: before})
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		logAudit(c, r, userID, "update", resource, tokenizedID, http.StatusInternalServerError, &auditChange{Before: before})
 		return
+	}
+
+	// After state
+	after := reflect.New(reflect.TypeOf(model).Elem()).Interface()
+	if err := c.BC.GetRecordsByID(after, tokenizedID); err != nil {
+		// If we cannot fetch after, still return success but log with before only
+		logAudit(c, r, userID, "update", resource, tokenizedID, http.StatusOK, &auditChange{Before: before})
+	} else {
+		logAudit(c, r, userID, "update", resource, tokenizedID, http.StatusOK, &auditChange{Before: before, After: after})
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -640,7 +794,7 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 
 // Delete removes a record by its primary key.
 // @Summary     Delete a record
-// @Description Deletes a resource identified by its primary key. Supports composite keys via hyphen-separated format.
+// @Description Deletes a resource identified by its primary key. Supports composite keys via hyphen-separated composite format.
 // @Tags        admin
 // @Accept      json
 // @Produce     json
@@ -654,6 +808,7 @@ func (c *Controller) Delete(w http.ResponseWriter, r *http.Request, model interf
 	w.Header().Set("Content-Type", "application/json")
 
 	vars := mux.Vars(r)
+	resource := vars["resource"]
 	tokenizedID := vars["id"]
 
 	ownOnly, userID := ownOnlyAndUserID(r)
@@ -662,6 +817,16 @@ func (c *Controller) Delete(w http.ResponseWriter, r *http.Request, model interf
 	if ownOnly && !ownsByID(c, model, tokenizedID, userID) {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Record not found or access denied."})
+		logAudit(c, r, userID, "delete", resource, tokenizedID, http.StatusNotFound, nil)
+		return
+	}
+
+	// Load "before" snapshot
+	before := reflect.New(reflect.TypeOf(model).Elem()).Interface()
+	if err := c.BC.GetRecordsByID(before, tokenizedID); err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		logAudit(c, r, userID, "delete", resource, tokenizedID, http.StatusNotFound, nil)
 		return
 	}
 
@@ -669,12 +834,17 @@ func (c *Controller) Delete(w http.ResponseWriter, r *http.Request, model interf
 		if strings.Contains(err.Error(), "no records deleted") || strings.Contains(err.Error(), "not found") {
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+			logAudit(c, r, userID, "delete", resource, tokenizedID, http.StatusNotFound, &auditChange{Before: before})
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		logAudit(c, r, userID, "delete", resource, tokenizedID, http.StatusInternalServerError, &auditChange{Before: before})
 		return
 	}
+
+	// Success
+	logAudit(c, r, userID, "delete", resource, tokenizedID, http.StatusOK, &auditChange{Before: before})
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Deleted successfully"})

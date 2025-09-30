@@ -1,0 +1,10 @@
+.git
+.gitignore
+docker-compose*.yml
+Dockerfile*
+README.md
+**/*.log
+tmp
+vendor
+mysql_data
+.env

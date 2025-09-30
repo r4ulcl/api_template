@@ -40,6 +40,7 @@ func init() {
 var ModelMap = map[string]interface{}{
 	"user":              &User{}, // Do not delete
 	"apiKey":            &APIKey{},
+	"auditLog":          &AuditLog{},
 	"example1":          &Example1{},
 	"example2":          &Example2{},
 	"exampleRelational": &ExampleRelational{},
