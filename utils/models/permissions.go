@@ -1,6 +1,6 @@
 package models
 
-// Permissions holds the slice of resource‐names for each HTTP method.
+// Permissions defines which resources a role can access for each HTTP verb and scope.
 type Permissions struct {
 	Get       []string
 	GetOwn    []string
@@ -14,44 +14,87 @@ type Permissions struct {
 	DeleteOwn []string
 }
 
-// Existing 3 roles anonymous, User, and admin
-// Edit this arrays to allow access to roles to endpoints
+/* -------------------------------------------------------------------------- */
+/*                            ANONYMOUS PERMISSIONS                           */
+/* -------------------------------------------------------------------------- */
+
 var AnonymousGetResources = []string{}
 var AnonymousGetResourcesOwn = []string{}
+
 var AnonymousPostResources = []string{}
 var AnonymousPostResourcesOwn = []string{}
+
 var AnonymousPutResources = []string{}
 var AnonymousPutResourcesOwn = []string{}
+
 var AnonymousPatchResources = []string{}
 var AnonymousPatchResourcesOwn = []string{}
+
 var AnonymousDeleteResources = []string{}
 var AnonymousDeleteResourcesOwn = []string{}
 
+/* -------------------------------------------------------------------------- */
+/*                              USER PERMISSIONS                              */
+/* -------------------------------------------------------------------------- */
+
 var UserGetResources = []string{"example2"}
 var UserGetResourcesOwn = []string{"example1", "exampleRelational"}
+
 var UserPostResources = []string{"example2"}
 var UserPostResourcesOwn = []string{"example1", "exampleRelational"}
+
 var UserPutResources = []string{}
 var UserPutResourcesOwn = []string{"example1", "example2", "exampleRelational"}
+
 var UserPatchResources = []string{}
 var UserPatchResourcesOwn = []string{"example1", "example2", "exampleRelational"}
+
 var UserDeleteResources = []string{}
 var UserDeleteResourcesOwn = []string{"example1", "example2", "exampleRelational"}
 
-var AdminGetResources = []string{"user", "example1", "example2", "exampleRelational"}
+/* -------------------------------------------------------------------------- */
+/*                             REVIEWER PERMISSIONS                           */
+/* -------------------------------------------------------------------------- */
+
+// Reviewer: read-only access to all models except user data.
+var ReviewerGetResources = []string{"example1", "example2", "exampleRelational"}
+var ReviewerGetResourcesOwn = []string{}
+
+var ReviewerPostResources = []string{}
+var ReviewerPostResourcesOwn = []string{}
+
+var ReviewerPutResources = []string{}
+var ReviewerPutResourcesOwn = []string{}
+
+var ReviewerPatchResources = []string{}
+var ReviewerPatchResourcesOwn = []string{}
+
+var ReviewerDeleteResources = []string{}
+var ReviewerDeleteResourcesOwn = []string{}
+
+/* -------------------------------------------------------------------------- */
+/*                              ADMIN PERMISSIONS                             */
+/* -------------------------------------------------------------------------- */
+
+var AdminGetResources = []string{"auditLog", "user", "example1", "example2", "exampleRelational"}
 var AdminGetResourcesOwn = []string{}
-var AdminPostResources = []string{"user", "example1", "example2", "exampleRelational"}
+
+var AdminPostResources = []string{"auditLog", "user", "example1", "example2", "exampleRelational"}
 var AdminPostResourcesOwn = []string{}
-var AdminPutResources = []string{"user", "example1", "example2", "exampleRelational"}
+
+var AdminPutResources = []string{"auditLog", "user", "example1", "example2", "exampleRelational"}
 var AdminPutResourcesOwn = []string{}
-var AdminPatchResources = []string{"user", "example1", "example2", "exampleRelational"}
+
+var AdminPatchResources = []string{"auditLog", "user", "example1", "example2", "exampleRelational"}
 var AdminPatchResourcesOwn = []string{}
-var AdminDeleteResources = []string{"user", "example1", "example2", "exampleRelational"}
+
+var AdminDeleteResources = []string{"auditLog", "user", "example1", "example2", "exampleRelational"}
 var AdminDeleteResourcesOwn = []string{}
 
-// RolePermissions ties a role‐name (string) to its Permissions.
-// Feel free to add/remove keys here.
-// The router will pick up any change automatically.
+/* -------------------------------------------------------------------------- */
+/*                              ROLE → PERMISSIONS                            */
+/* -------------------------------------------------------------------------- */
+
 var RolePermissions = map[string]Permissions{
 	"anonymous": {
 		Get:       AnonymousGetResources,
@@ -76,6 +119,18 @@ var RolePermissions = map[string]Permissions{
 		PatchOwn:  UserPatchResourcesOwn,
 		Delete:    UserDeleteResources,
 		DeleteOwn: UserDeleteResourcesOwn,
+	},
+	"reviewer": {
+		Get:       ReviewerGetResources,
+		GetOwn:    ReviewerGetResourcesOwn,
+		Post:      ReviewerPostResources,
+		PostOwn:   ReviewerPostResourcesOwn,
+		Put:       ReviewerPutResources,
+		PutOwn:    ReviewerPutResourcesOwn,
+		Patch:     ReviewerPatchResources,
+		PatchOwn:  ReviewerPatchResourcesOwn,
+		Delete:    ReviewerDeleteResources,
+		DeleteOwn: ReviewerDeleteResourcesOwn,
 	},
 	"admin": {
 		Get:       AdminGetResources,

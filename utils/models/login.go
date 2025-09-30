@@ -6,11 +6,10 @@ import "time"
 type Role string
 
 const (
-	// AdminRole represents an administrator with higher privileges.
-	AdminRole Role = "admin" // @Enum admin
-
-	// UserRole represents a regular user with standard privileges.
-	UserRole Role = "user" // @Enum user
+	//AnonymousRole Role = "anonymous"
+	UserRole     Role = "user"
+	ReviewerRole Role = "reviewer"
+	AdminRole    Role = "admin"
 )
 
 // User represents a system user.
@@ -39,12 +38,12 @@ type User struct {
 
 // models/api_key.go
 type APIKey struct {
-	Token     string     `gorm:"primaryKey;column:token;size:512" json:"token"`
-	Description  string     `gorm:"column:description" json:"description"`
-	Username  string     `gorm:"column:username;index;not null" json:"username"`
-	Enabled   bool       `gorm:"column:enabled;default:true" json:"enabled"`
-	CreatedAt time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	LastUsed  *time.Time `gorm:"column:last_used" json:"last_used,omitempty"`
+	Token       string     `gorm:"primaryKey;column:token;size:512" json:"token"`
+	Description string     `gorm:"column:description" json:"description"`
+	Username    string     `gorm:"column:username;index;not null" json:"username"`
+	Enabled     bool       `gorm:"column:enabled;default:true" json:"enabled"`
+	CreatedAt   time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	LastUsed    *time.Time `gorm:"column:last_used" json:"last_used,omitempty"`
 }
 
 func (APIKey) TableName() string { return "api_key" } // singular
