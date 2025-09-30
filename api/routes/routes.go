@@ -1,8 +1,11 @@
 package routes
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"reflect"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/r4ulcl/api_template/api/controllers"
@@ -98,6 +101,60 @@ func registerCRUD(
 		})
 		router.Handle(item, wrap(del)).Methods("DELETE")
 	}
+}
+
+func serviceAccessMiddleware(access models.ServiceAccess) func(http.Handler) http.Handler {
+	hasRoleRestrictions := len(access.FullRoles) > 0 || len(access.OwnRoles) > 0
+	hasUserRestrictions := len(access.Usernames) > 0
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			usernameVal := ctx.Value(middlewares.ContextUserID)
+			username, _ := usernameVal.(string)
+			roleVal := ctx.Value(middlewares.ContextRole)
+			role, _ := roleVal.(string)
+
+			if strings.TrimSpace(username) == "" || strings.TrimSpace(role) == "" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Missing authentication context"})
+				return
+			}
+
+			if !hasRoleRestrictions && !hasUserRestrictions {
+				ctx = context.WithValue(ctx, middlewares.ContextOwnOnly, false)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			if contains(access.Usernames, username) {
+				ctx = context.WithValue(ctx, middlewares.ContextOwnOnly, false)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			isFull := contains(access.FullRoles, role)
+			isOwn := contains(access.OwnRoles, role)
+
+			if !isFull && !isOwn {
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Forbidden: insufficient permissions"})
+				return
+			}
+
+			ctx = context.WithValue(ctx, middlewares.ContextOwnOnly, isOwn && !isFull)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func contains(values []string, target string) bool {
+	for _, v := range values {
+		if v == target {
+			return true
+		}
+	}
+	return false
 }
 
 // -----------------------------------------------------------------------------
@@ -280,6 +337,21 @@ func SetupRouter(
 	}
 	for res, rs := range methodRoles["DELETE"] {
 		registerCRUD(authSub, baseController, authController, "DELETE", res, models.ModelMap[res], rs.full, rs.own, false, readLog)
+	}
+
+	for _, svc := range models.ServiceDefinitions {
+		handler, ok := controllers.GetServiceHandler(svc.Handler, baseController)
+		if !ok {
+			continue
+		}
+
+		method := strings.ToUpper(strings.TrimSpace(svc.Method))
+		if method == "" {
+			method = http.MethodPost
+		}
+
+		h := serviceAccessMiddleware(svc.Access)(handler)
+		authSub.Handle(svc.Path, h).Methods(method)
 	}
 
 	// ---------- 3. /stats endpoint ----------

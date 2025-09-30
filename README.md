@@ -17,6 +17,7 @@ A **Go REST API** with MySQL database support, featuring **dynamic API endpoints
 * **Advanced filtering** and **sorting** support (`limit`, `page`, `sort`, operators)
 * **Bulk inserts** using JSON arrays `[{}]`
 * **Custom permissions per model type**
+* **Service actions** with role/username gates (no CRUD payloads required)
 * **GUI-ready API responses** filtered by user access level
 * **Automatic CreatedAt, EditedAt, UpdatedBy, CreatedBy** fields on all objects (not editable)
 * **User API key generation** (no expiration, validated on server)
@@ -84,8 +85,9 @@ A **Go REST API** with MySQL database support, featuring **dynamic API endpoints
 api_template/
 ├── api/
 │   ├── controllers/
-│   │   ├── auth_controller.go   # Registration & login handlers
-│   │   └── base_controller.go   # Generic CRUD handlers
+│   │   ├── auth_controller.go     # Registration & login handlers
+│   │   ├── base_controller.go     # Generic CRUD handlers
+│   │   └── service_controller.go  # Custom service endpoints & helpers
 │   ├── middlewares/
 │   │   └── auth_middleware.go   # JWT & RBAC middleware
 │   └── routes/
@@ -99,7 +101,7 @@ api_template/
 │       ├── api.go               # LoginRequest, RegisterRequest, JWTResponse, ErrorResponse
 │       ├── database.go          # Example1, Example2, ExampleRelational structs
 │       ├── login.go             # User model & Role enum
-│       └── permissions.go       # RolePermissions & ModelMap
+│       └── permissions.go       # RolePermissions, ServiceDefinitions & ModelMap
 ├── docs/
 │   ├── docs.go                  # Swagger annotations
 │   ├── swagger.json             # Generated OpenAPI spec (JSON)
@@ -172,6 +174,81 @@ To add a new resource (for example a `Product`):
         -H "Authorization: Bearer <admin-token>" \
         -d '{"name":"Gadget","price":19.99}'
    ```
+
+---
+
+## Adding Service Actions
+
+Service actions let you expose ad-hoc endpoints (restart a workflow, fetch a status, etc.) without creating a database-backed model. They rely on the new `ServiceDefinitions` map and the service controller helpers.
+
+1. **Add or update a handler** in `api/controllers/service_controller.go`:
+
+   ```go
+   func (c *Controller) sendReminderService(w http.ResponseWriter, r *http.Request) {
+     requester, _ := r.Context().Value(middlewares.ContextUserID).(string)
+     if strings.TrimSpace(requester) == "" {
+       respondJSON(w, http.StatusUnauthorized, models.ErrorResponse{Error: "Unauthorized"})
+       return
+     }
+
+     respondJSON(w, http.StatusOK, map[string]interface{}{
+       "service":     "sendReminder",
+       "requestedBy": requester,
+       "message":     "Reminder queued",
+     })
+   }
+   ```
+
+   Make sure the required imports (for example, `strings`) are present at the top of the file.
+
+   Register the handler in the local factory map (keep the existing entries and append yours):
+
+   ```go
+   var serviceHandlers = map[string]serviceHandlerFactory{
+     "currentExam":      func(c *Controller) http.Handler { return http.HandlerFunc(c.currentExamService) },
+     "restartExam":      func(c *Controller) http.Handler { return http.HandlerFunc(c.restartExamService) },
+     "exampleFunction":  func(c *Controller) http.Handler { return http.HandlerFunc(c.exampleFunctionService) },
+     "exampleFunction2": func(c *Controller) http.Handler { return http.HandlerFunc(c.exampleFunction2Service) },
+     "sendReminder":     func(c *Controller) http.Handler { return http.HandlerFunc(c.sendReminderService) },
+   }
+   ```
+
+   Handlers receive the same request context as normal routes, so you can read JWT claims or call into your persistence layer.
+
+2. **Configure permissions** in `utils/models/permissions.go` by appending to `ServiceDefinitions`:
+
+   ```go
+   var ServiceDefinitions = []ServiceDefinition{
+     {
+       Name:    "sendReminder",
+       Method:  "POST",
+       Path:    "/services/reminders/send",
+       Handler: "sendReminder",
+       Access: ServiceAccess{
+         FullRoles: []string{"admin", "reviewer"},
+         OwnRoles:  []string{"user"},
+         Usernames: []string{"automation-bot"},
+       },
+     },
+   }
+   ```
+
+   * `FullRoles` bypass own-only checks and can act on any target.
+   * `OwnRoles` are automatically flagged as own-only; handlers can check `middlewares.IsOwnOnly(r.Context())` to restrict scope.
+   * `Usernames` is a shortcut allowlist that applies regardless of role (useful for system accounts).
+   * Leave lists empty to allow all roles with the authenticated token (`FullRoles: nil` gives access to every role).
+
+3. **Call the endpoint** once the API is running:
+
+   ```bash
+   curl -X POST \
+     -H "Authorization: Bearer <token>" \
+     http://localhost:8080/services/reminders/send
+   ```
+
+   Service routes are mounted under the authenticated router, so they require JWT/API-key authentication just like other protected endpoints. Run `gofmt` after editing Go files to keep formatting tidy.
+
+> Tip: if you need audit logging or side effects, the service handlers have full access to `c.BC.DB` via the controller.
 
 ---
 

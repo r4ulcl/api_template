@@ -38,7 +38,7 @@ var AnonymousDeleteResourcesOwn = []string{}
 /* -------------------------------------------------------------------------- */
 
 var UserGetResources = []string{"example2"}
-var UserGetResourcesOwn = []string{"example1", "exampleRelational"}
+var UserGetResourcesOwn = []string{"example1", "exampleRelational", "auditLog"}
 
 var UserPostResources = []string{"example2"}
 var UserPostResourcesOwn = []string{"example1", "exampleRelational"}
@@ -143,5 +143,73 @@ var RolePermissions = map[string]Permissions{
 		PatchOwn:  AdminPatchResourcesOwn,
 		Delete:    AdminDeleteResources,
 		DeleteOwn: AdminDeleteResourcesOwn,
+	},
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              SERVICE DEFINITIONS                           */
+/* -------------------------------------------------------------------------- */
+
+// ServiceAccess defines which roles and usernames can trigger a service endpoint.
+// FullRoles gain unrestricted access, OwnRoles run under own-only scope, and specific
+// usernames can be whitelisted regardless of their role (useful for break-glass users).
+type ServiceAccess struct {
+	FullRoles []string
+	OwnRoles  []string
+	Usernames []string
+}
+
+// ServiceDefinition describes a custom action endpoint that is not tied to a CRUD
+// resource. Handlers are looked up by name inside the controllers package.
+type ServiceDefinition struct {
+	Name    string
+	Method  string
+	Path    string
+	Handler string
+	Access  ServiceAccess
+}
+
+// ServiceDefinitions exposes the available service endpoints. These examples illustrate
+// how to wire own-scoped actions (current exam), admin overrides (restart exam), and
+// lightweight no-op handlers (exampleFunction, exampleFunction2).
+var ServiceDefinitions = []ServiceDefinition{
+	{
+		Name:    "currentExam",
+		Method:  "GET",
+		Path:    "/services/exams/current",
+		Handler: "currentExam",
+		Access: ServiceAccess{
+			FullRoles: []string{"admin"},
+			OwnRoles:  []string{"user"},
+		},
+	},
+	{
+		Name:    "restartExam",
+		Method:  "POST",
+		Path:    "/services/exams/restart",
+		Handler: "restartExam",
+		Access: ServiceAccess{
+			FullRoles: []string{"admin"},
+			Usernames: []string{"exam-supervisor"},
+		},
+	},
+	{
+		Name:    "exampleFunction",
+		Method:  "POST",
+		Path:    "/services/example-function",
+		Handler: "exampleFunction",
+		Access: ServiceAccess{
+			FullRoles: []string{"user", "reviewer", "admin"},
+		},
+	},
+	{
+		Name:    "exampleFunction2",
+		Method:  "GET",
+		Path:    "/services/example-function-2",
+		Handler: "exampleFunction2",
+		Access: ServiceAccess{
+			FullRoles: []string{"admin"},
+			Usernames: []string{"integration-bot"},
+		},
 	},
 }

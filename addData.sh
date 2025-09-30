@@ -170,7 +170,8 @@ AUTH_A="Authorization: Bearer $JWT_A"
 AUTH_B="Authorization: Bearer $JWT_B"
  
 # Insert per user
-echo "Inserting data for $USER_A and $USER_B"
+echo "Inserting data for admin, $USER_A and $USER_B"
+insert_data_for_user "$ADMIN_AUTH" "admin" "$COUNT_PER_USER"
 insert_data_for_user "$AUTH_A" "$USER_A" "$COUNT_PER_USER"
 insert_data_for_user "$AUTH_B" "$USER_B" "$COUNT_PER_USER"
 
