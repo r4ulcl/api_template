@@ -1,0 +1,8 @@
+[
+  { "name": "user", "type": "User" },
+  { "name": "apiKey", "type": "APIKey" },
+  { "name": "auditLog", "type": "AuditLog" },
+  { "name": "example1", "type": "Example1" },
+  { "name": "example2", "type": "Example2" },
+  { "name": "exampleRelational", "type": "ExampleRelational" }
+]

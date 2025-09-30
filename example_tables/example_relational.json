@@ -1,0 +1,28 @@
+{
+  "name": "example_relational",
+  "alias": "exampleRelational",
+  "withTimestamps": true,
+  "withAuditing": true,
+  "primaryKeys": ["example1_field1", "example2_field1"],
+  "columns": [
+    {"name": "example1_field1", "type": "varchar(255)", "nullable": false},
+    {"name": "example2_field1", "type": "varchar(255)", "nullable": false},
+    {"name": "field3", "type": "text", "nullable": true}
+  ],
+  "foreignKeys": [
+    {
+      "columns": ["example1_field1"],
+      "refTable": "example1",
+      "refColumns": ["field1"],
+      "onUpdate": "CASCADE",
+      "onDelete": "CASCADE"
+    },
+    {
+      "columns": ["example2_field1"],
+      "refTable": "example2",
+      "refColumns": ["field1"],
+      "onUpdate": "CASCADE",
+      "onDelete": "CASCADE"
+    }
+  ]
+}

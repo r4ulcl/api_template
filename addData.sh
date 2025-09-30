@@ -24,12 +24,13 @@ create_user() {
   local username="$2"
   local password="$3"
   local email="$4"
+  local role="$5"
   curl -s -X POST "$BASE_URL/user" \
     -H "$admin_header" -H "Content-Type: application/json" \
     -d "{
       \"username\":\"$username\",
       \"password\":\"$password\",
-      \"role\":\"user\",
+      \"role\":\"$role\",
       \"email\":\"$email\",
       \"email_verified\":true
     }" >/dev/null
@@ -155,19 +156,23 @@ ADMIN_AUTH="Authorization: Bearer $ADMIN_JWT"
 # Create users
 USER_A="alice"
 USER_B="bob"
+USER_C="viewer"
 PASS_A="alice"
 PASS_B="bob"
-echo "Creating users $USER_A and $USER_B"
-create_user "$ADMIN_AUTH" "$USER_A" "$PASS_A" "alice@example.com" || true
-create_user "$ADMIN_AUTH" "$USER_B" "$PASS_B" "bob@example.com" || true
+PASS_C="viewer"
+echo "Creating users $USER_A, $USER_B and USER_C"
+create_user "$ADMIN_AUTH" "$USER_A" "$PASS_A" "alice@example.com" "user" || true
+create_user "$ADMIN_AUTH" "$USER_B" "$PASS_B" "bob@example.com" "user" || true
+create_user "$ADMIN_AUTH" "$USER_C" "$PASS_C" "viewer@example.com" "reviewer"|| true
 
- 
 
 # Login as users
 JWT_A="$(login "$USER_A" "$PASS_A")"
 JWT_B="$(login "$USER_B" "$PASS_B")"
+JWT_C="$(login "$USER_C" "$PASS_C")"
 AUTH_A="Authorization: Bearer $JWT_A"
 AUTH_B="Authorization: Bearer $JWT_B"
+AUTH_C="Authorization: Bearer $JWT_C"
  
 # Insert per user
 echo "Inserting data for admin, $USER_A and $USER_B"

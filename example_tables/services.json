@@ -1,0 +1,46 @@
+[
+  {
+    "name": "currentExam",
+    "method": "GET",
+    "path": "/services/exams/current",
+    "handler": "currentExam",
+    "access": {
+      "fullRoles": ["admin"],
+      "ownRoles": ["user"],
+      "usernames": []
+    }
+  },
+  {
+    "name": "restartExam",
+    "method": "POST",
+    "path": "/services/exams/restart",
+    "handler": "restartExam",
+    "access": {
+      "fullRoles": ["admin"],
+      "ownRoles": [],
+      "usernames": ["exam-supervisor"]
+    }
+  },
+  {
+    "name": "exampleFunction",
+    "method": "POST",
+    "path": "/services/example-function",
+    "handler": "exampleFunction",
+    "access": {
+      "fullRoles": ["user", "reviewer", "admin"],
+      "ownRoles": [],
+      "usernames": []
+    }
+  },
+  {
+    "name": "exampleFunction2",
+    "method": "GET",
+    "path": "/services/example-function-2",
+    "handler": "exampleFunction2",
+    "access": {
+      "fullRoles": ["admin"],
+      "ownRoles": [],
+      "usernames": ["integration-bot"]
+    }
+  }
+]

@@ -61,6 +61,12 @@ A **Go REST API** with MySQL database support, featuring **dynamic API endpoints
    SWAGGER=true
    ```
 
+   Optional overrides:
+
+   * `PERMISSIONS_FILE` — absolute/relative path to a JSON file with role → verb mappings.
+   * `SERVICE_DEFINITIONS_FILE` — path to a JSON file listing custom service endpoints.
+   * `MODEL_MAP_FILE` — path to a JSON file that lists API resources and the Go model type each uses.
+
 4. **Update module path**
 
    ```bash
@@ -101,7 +107,11 @@ api_template/
 │       ├── api.go               # LoginRequest, RegisterRequest, JWTResponse, ErrorResponse
 │       ├── database.go          # Example1, Example2, ExampleRelational structs
 │       ├── login.go             # User model & Role enum
-│       └── permissions.go       # RolePermissions, ServiceDefinitions & ModelMap
+│       └── permissions.go       # Loads RolePermissions/ServiceDefinitions from JSON; ModelMap
+├── example_tables/              # Sample JSON configs for permissions/services/models
+│   ├── models.json
+│   ├── permissions.json
+│   └── services.json
 ├── docs/
 │   ├── docs.go                  # Swagger annotations
 │   ├── swagger.json             # Generated OpenAPI spec (JSON)
@@ -138,23 +148,32 @@ To add a new resource (for example a `Product`):
    }
    ```
 
-2. **Register resource and permissions**
-   In `utils/models/permissions.go`, add `"product"` to each appropriate permissions slice and to `ModelMap`:
+2. **Grant access and register the resource**
+   - Update `example_tables/permissions.json` (or the file referenced by `PERMISSIONS_FILE`) so each role/verb that should see the resource lists `"product"`. Example:
 
-   ```diff
-   // permissions.go
+     ```json
+     "user": {
+       "get": ["example2"],
+       "getOwn": ["example1", "exampleRelational", "product"],
+       "post": ["example2"],
+       "postOwn": ["example1", "exampleRelational", "product"],
+       "putOwn": ["example1", "example2", "exampleRelational", "product"]
+     }
+     ```
 
-   var UserGetResources = []string{"example1", "example2", "exampleRelational", "product"}
-   // … likewise for AdminGetResources, AdminPostResources, etc.
+   - Append an entry to `example_tables/models.json` (or the file pointed to by `MODEL_MAP_FILE`). The `type` must match a key in the internal registry (use `models.RegisterModel` to add new ones):
 
-   var ModelMap = map[string]interface{}{
-     "user":              &User{},
-     "example1":          &Example1{},
-     "example2":          &Example2{},
-     "exampleRelational": &ExampleRelational{},
-   + "product":           &Product{},
-   }
-   ```
+     ```json
+     { "name": "product", "type": "Product" }
+     ```
+
+     If you add a brand new struct, register it during startup:
+
+     ```go
+     func init() {
+       models.RegisterModel("Product", &models.Product{})
+     }
+     ```
 
 3. **Rebuild and restart**
 
@@ -215,28 +234,26 @@ Service actions let you expose ad-hoc endpoints (restart a workflow, fetch a sta
 
    Handlers receive the same request context as normal routes, so you can read JWT claims or call into your persistence layer.
 
-2. **Configure permissions** in `utils/models/permissions.go` by appending to `ServiceDefinitions`:
+2. **Expose the service** by editing `example_tables/services.json` (or the file pointed to by `SERVICE_DEFINITIONS_FILE`) and appending an entry:
 
-   ```go
-   var ServiceDefinitions = []ServiceDefinition{
-     {
-       Name:    "sendReminder",
-       Method:  "POST",
-       Path:    "/services/reminders/send",
-       Handler: "sendReminder",
-       Access: ServiceAccess{
-         FullRoles: []string{"admin", "reviewer"},
-         OwnRoles:  []string{"user"},
-         Usernames: []string{"automation-bot"},
-       },
-     },
+   ```json
+   {
+     "name": "sendReminder",
+     "method": "POST",
+     "path": "/services/reminders/send",
+     "handler": "sendReminder",
+     "access": {
+       "fullRoles": ["admin", "reviewer"],
+       "ownRoles": ["user"],
+       "usernames": ["automation-bot"]
+     }
    }
    ```
 
-   * `FullRoles` bypass own-only checks and can act on any target.
-   * `OwnRoles` are automatically flagged as own-only; handlers can check `middlewares.IsOwnOnly(r.Context())` to restrict scope.
-   * `Usernames` is a shortcut allowlist that applies regardless of role (useful for system accounts).
-   * Leave lists empty to allow all roles with the authenticated token (`FullRoles: nil` gives access to every role).
+   * `fullRoles` bypass own-only checks and can act on any target.
+   * `ownRoles` are automatically flagged as own-only; handlers can check `middlewares.IsOwnOnly(r.Context())` to restrict scope.
+   * `usernames` is a shortcut allowlist that applies regardless of role (useful for system accounts).
+   * Leave arrays empty to allow every authenticated role or account for that category.
 
 3. **Call the endpoint** once the API is running:
 

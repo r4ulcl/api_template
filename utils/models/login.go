@@ -10,6 +10,8 @@ const (
 	UserRole     Role = "user"
 	ReviewerRole Role = "reviewer"
 	AdminRole    Role = "admin"
+	// DefaultRoleWhitelist applies to any role not explicitly listed in UpdateUserWhitelist.
+	DefaultRoleWhitelist Role = "*"
 )
 
 // User represents a system user.
@@ -55,11 +57,12 @@ type UpdateUser struct {
 }
 
 // UpdateUserWhitelist defines which JSON fields are accepted per role.
+
 var UpdateUserWhitelist = map[Role]map[string]bool{
-	UserRole: {
+	DefaultRoleWhitelist: {
 		"password":     true, // current password input
 		"new_password": true,
-		"email":        true, // allow users to change email
+		"email":        true, // allow non-admins to change email
 	},
 	AdminRole: {
 		"new_password":   true,

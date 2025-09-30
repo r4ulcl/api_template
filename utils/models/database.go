@@ -1,20 +1,93 @@
 package models
 
 import (
+	"encoding/json"
+	"fmt"
+	"log"
 	"reflect"
 	"strings"
 	"time"
 )
 
-// RelationalModelKeys lists which ModelMap entries need their own AutoMigrate pass.
-// NormalModelKeys lists models to migrate in the first (non-relational) pass.
+// ModelDefinition declares how a resource name maps to a concrete Go model.
+type ModelDefinition struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+const (
+	modelMapEnvKey      = "MODEL_MAP_FILE"
+	defaultModelMapFile = "example_tables/models.json"
+)
+
 var (
+	// ModelMap maps resource names to model prototypes.
+	ModelMap = map[string]interface{}{}
+	// RelationalModelKeys lists which ModelMap entries need their own AutoMigrate pass.
 	RelationalModelKeys []string
-	NormalModelKeys     []string
+	// NormalModelKeys lists models to migrate in the first (non-relational) pass.
+	NormalModelKeys []string
+
+	modelRegistry = map[string]interface{}{
+		"User":              &User{},
+		"APIKey":            &APIKey{},
+		"AuditLog":          &AuditLog{},
+		"Example1":          &Example1{},
+		"Example2":          &Example2{},
+		"ExampleRelational": &ExampleRelational{},
+	}
+
+	defaultModelDefinitionsJSON = []byte(`[
+	  {"name": "user", "type": "User"},
+	  {"name": "apiKey", "type": "APIKey"},
+	  {"name": "auditLog", "type": "AuditLog"},
+	  {"name": "example1", "type": "Example1"},
+	  {"name": "example2", "type": "Example2"},
+	  {"name": "exampleRelational", "type": "ExampleRelational"}
+	]`)
 )
 
 func init() {
-	// Automatically detect relational vs. normal tables by checking for gorm foreignKey tags
+	if err := LoadModelMap(); err != nil {
+		log.Printf("models: %v", err)
+	}
+}
+
+// RegisterModel lets callers extend the registry so JSON definitions can reference new types.
+func RegisterModel(typeKey string, prototype interface{}) {
+	modelRegistry[typeKey] = prototype
+}
+
+// LoadModelMap refreshes ModelMap from disk or the embedded defaults.
+func LoadModelMap() error {
+	data, err := readConfig(modelMapEnvKey, defaultModelMapFile, defaultModelDefinitionsJSON)
+	if err != nil {
+		return err
+	}
+
+	var defs []ModelDefinition
+	if err := json.Unmarshal(data, &defs); err != nil {
+		return fmt.Errorf("models: parse model definitions: %w", err)
+	}
+
+	newMap := make(map[string]interface{}, len(defs))
+	for _, def := range defs {
+		prototype, ok := modelRegistry[def.Type]
+		if !ok {
+			return fmt.Errorf("models: unknown model type %q for resource %q", def.Type, def.Name)
+		}
+		newMap[def.Name] = prototype
+	}
+
+	ModelMap = newMap
+	rebuildModelKeys()
+	return nil
+}
+
+func rebuildModelKeys() {
+	RelationalModelKeys = RelationalModelKeys[:0]
+	NormalModelKeys = NormalModelKeys[:0]
+
 	for name, model := range ModelMap {
 		t := reflect.TypeOf(model)
 		if t.Kind() == reflect.Ptr {
@@ -34,16 +107,6 @@ func init() {
 			NormalModelKeys = append(NormalModelKeys, name)
 		}
 	}
-}
-
-// ModelMap maps resource names to model pointers. (Update this with all models)
-var ModelMap = map[string]interface{}{
-	"user":              &User{}, // Do not delete
-	"apiKey":            &APIKey{},
-	"auditLog":          &AuditLog{},
-	"example1":          &Example1{},
-	"example2":          &Example2{},
-	"exampleRelational": &ExampleRelational{},
 }
 
 // Example1 represents a database table storing example data.

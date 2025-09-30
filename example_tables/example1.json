@@ -1,0 +1,12 @@
+{
+  "name": "example1",
+  "alias": "example1",
+  "withTimestamps": true,
+  "withAuditing": true,
+  "primaryKeys": ["field1"],
+  "columns": [
+    {"name": "field1", "type": "varchar(255)", "nullable": false},
+    {"name": "field2", "type": "text", "nullable": true}
+  ],
+  "foreignKeys": []
+}

@@ -112,7 +112,10 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 	}
 
 	// 5) Field-level gate
-	allowed := models.UpdateUserWhitelist[currentRole]
+	allowed, ok := models.UpdateUserWhitelist[currentRole]
+	if !ok {
+		allowed = models.UpdateUserWhitelist[models.DefaultRoleWhitelist]
+	}
 
 	for key := range payload {
 		if disallowedAlways[key] {
