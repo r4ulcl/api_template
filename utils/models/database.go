@@ -36,15 +36,6 @@ var (
 		"Example2":          &Example2{},
 		"ExampleRelational": &ExampleRelational{},
 	}
-
-	defaultModelDefinitionsJSON = []byte(`[
-	  {"name": "user", "type": "User"},
-	  {"name": "apiKey", "type": "APIKey"},
-	  {"name": "auditLog", "type": "AuditLog"},
-	  {"name": "example1", "type": "Example1"},
-	  {"name": "example2", "type": "Example2"},
-	  {"name": "exampleRelational", "type": "ExampleRelational"}
-	]`)
 )
 
 func init() {
@@ -60,7 +51,7 @@ func RegisterModel(typeKey string, prototype interface{}) {
 
 // LoadModelMap refreshes ModelMap from disk or the embedded defaults.
 func LoadModelMap() error {
-	data, err := readConfig(modelMapEnvKey, defaultModelMapFile, defaultModelDefinitionsJSON)
+	data, err := readConfig(modelMapEnvKey, defaultModelMapFile)
 	if err != nil {
 		return err
 	}

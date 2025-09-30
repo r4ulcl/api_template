@@ -164,7 +164,7 @@ func init() {
 
 // LoadRolePermissions refreshes RolePermissions from disk or embedded defaults.
 func LoadRolePermissions() error {
-	data, err := readConfig(permissionsEnvKey, defaultPermissionsFile, defaultRolePermissionsJSON)
+	data, err := readConfig(permissionsEnvKey, defaultPermissionsFile)
 	if err != nil {
 		return err
 	}
@@ -179,7 +179,7 @@ func LoadRolePermissions() error {
 
 // LoadServiceDefinitions refreshes ServiceDefinitions from disk or embedded defaults.
 func LoadServiceDefinitions() error {
-	data, err := readConfig(servicesEnvKey, defaultServicesFile, defaultServiceDefinitionsJSON)
+	data, err := readConfig(servicesEnvKey, defaultServicesFile)
 	if err != nil {
 		return err
 	}
@@ -192,14 +192,10 @@ func LoadServiceDefinitions() error {
 	return nil
 }
 
-func readConfig(envKey, defaultPath string, fallback []byte) ([]byte, error) {
+func readConfig(envKey, defaultPath string) ([]byte, error) {
 	if envPath, ok := os.LookupEnv(envKey); ok {
 		data, err := os.ReadFile(envPath)
 		if err != nil {
-			if len(fallback) > 0 {
-				log.Printf("models: %s=%s could not be read (%v); using embedded fallback", envKey, envPath, err)
-				return fallback, nil
-			}
 			return nil, fmt.Errorf("models: %s=%s could not be read: %w", envKey, envPath, err)
 		}
 		return data, nil
@@ -207,11 +203,6 @@ func readConfig(envKey, defaultPath string, fallback []byte) ([]byte, error) {
 
 	if data, err := os.ReadFile(defaultPath); err == nil {
 		return data, nil
-	}
-
-	if len(fallback) > 0 {
-		log.Printf("models: %s not found; using embedded fallback", defaultPath)
-		return fallback, nil
 	}
 
 	return nil, fmt.Errorf("models: %s not found and no embedded fallback; set %s", defaultPath, envKey)
