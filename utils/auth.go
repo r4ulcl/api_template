@@ -3,7 +3,7 @@ package utils
 import (
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
@@ -170,7 +170,7 @@ func generateTOTP(key []byte, counter int64) string {
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], uint64(counter))
 
-	h := hmac.New(sha1.New, key)
+	h := hmac.New(sha256.New, key)
 	_, _ = h.Write(buf[:])
 	sum := h.Sum(nil)
 	if len(sum) < 20 {
