@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -15,8 +14,6 @@ import (
 type serviceHandlerFactory func(*Controller) http.Handler
 
 var serviceHandlers = map[string]serviceHandlerFactory{
-	"currentExam":      func(c *Controller) http.Handler { return http.HandlerFunc(c.currentExamService) },
-	"restartExam":      func(c *Controller) http.Handler { return http.HandlerFunc(c.restartExamService) },
 	"exampleFunction":  func(c *Controller) http.Handler { return http.HandlerFunc(c.exampleFunctionService) },
 	"exampleFunction2": func(c *Controller) http.Handler { return http.HandlerFunc(c.exampleFunction2Service) },
 }
@@ -34,58 +31,6 @@ func respondJSON(w http.ResponseWriter, status int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func (c *Controller) currentExamService(w http.ResponseWriter, r *http.Request) {
-	usernameVal := r.Context().Value(middlewares.ContextUserID)
-	username, _ := usernameVal.(string)
-	if strings.TrimSpace(username) == "" {
-		respondJSON(w, http.StatusUnauthorized, models.ErrorResponse{Error: "Unauthorized"})
-		return
-	}
-
-	// Allow admins (full access) to inspect other users via query param; own roles ignore it.
-	target := username
-	if !middlewares.IsOwnOnly(r.Context()) {
-		candidate := strings.TrimSpace(r.URL.Query().Get("username"))
-		if candidate != "" {
-			target = candidate
-		}
-	}
-
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"service":     "currentExam",
-		"username":    target,
-		"requestedBy": username,
-		"own_scope":   middlewares.IsOwnOnly(r.Context()),
-		"message":     fmt.Sprintf("Placeholder current exam details for %s", target),
-		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-	})
-}
-
-func (c *Controller) restartExamService(w http.ResponseWriter, r *http.Request) {
-	requesterVal := r.Context().Value(middlewares.ContextUserID)
-	requester, _ := requesterVal.(string)
-	if strings.TrimSpace(requester) == "" {
-		respondJSON(w, http.StatusUnauthorized, models.ErrorResponse{Error: "Unauthorized"})
-		return
-	}
-
-	target := requester
-	if !middlewares.IsOwnOnly(r.Context()) {
-		if candidate := strings.TrimSpace(r.URL.Query().Get("username")); candidate != "" {
-			target = candidate
-		}
-	}
-
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"service":     "restartExam",
-		"requestedBy": requester,
-		"target":      target,
-		"own_scope":   middlewares.IsOwnOnly(r.Context()),
-		"message":     fmt.Sprintf("Exam restart requested for %s", target),
-		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-	})
 }
 
 func (c *Controller) exampleFunctionService(w http.ResponseWriter, r *http.Request) {

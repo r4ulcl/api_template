@@ -1,27 +1,5 @@
 [
   {
-    "name": "currentExam",
-    "method": "GET",
-    "path": "/services/exams/current",
-    "handler": "currentExam",
-    "access": {
-      "fullRoles": ["admin"],
-      "ownRoles": ["user"],
-      "usernames": []
-    }
-  },
-  {
-    "name": "restartExam",
-    "method": "POST",
-    "path": "/services/exams/restart",
-    "handler": "restartExam",
-    "access": {
-      "fullRoles": ["admin"],
-      "ownRoles": [],
-      "usernames": ["exam-supervisor"]
-    }
-  },
-  {
     "name": "exampleFunction",
     "method": "POST",
     "path": "/services/example-function",
