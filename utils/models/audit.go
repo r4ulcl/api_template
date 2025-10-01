@@ -5,7 +5,7 @@ import "time"
 type AuditLog struct {
 	ID         uint   `gorm:"primaryKey" json:"id"`
 	ActorID    string `gorm:"index" json:"actor_id"`
-	Action     string `gorm:"size:16;index" json:"action"` // create, read, update, delete
+	Action     string `gorm:"size:128;index" json:"action"` // create, read, update, delete
 	Resource   string `gorm:"size:64;index" json:"resource"`
 	ResourceID string `gorm:"size:64;index" json:"resource_id"`
 	// minimal request context
