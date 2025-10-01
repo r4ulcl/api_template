@@ -27,7 +27,7 @@ type User struct {
 
 	// Authentication
 	Password    string `gorm:"column:password" json:"password"` // never returned in API responses
-	TotpSecret  string `gorm:"column:totp_secret" json:"-"`
+	TotpSecret  string `gorm:"column:totp_secret" json:"totp_secret,omitempty"`
 	TotpEnabled bool   `gorm:"column:totp_enabled" json:"totp_enabled"`
 
 	// Authorization
@@ -46,6 +46,7 @@ type User struct {
 
 // models/api_key.go
 type APIKey struct {
+	ID          uint       `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
 	Token       string     `gorm:"primaryKey;column:token;size:512" json:"token"`
 	Description string     `gorm:"column:description" json:"description"`
 	Username    string     `gorm:"column:username;index;not null" json:"username"`

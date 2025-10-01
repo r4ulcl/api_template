@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 )
 
 // Permissions defines which resources a role can access for each HTTP verb and scope.
@@ -51,57 +52,66 @@ const (
 var (
 	// RolePermissions maps role → permission set.
 	RolePermissions = make(map[string]Permissions)
+	// StatsHiddenTables lists tables that should be flagged as hidden in stats responses (normalized lowercase).
+	StatsHiddenTables []string
+	// StatsHiddenOriginalTables keeps the original casing for database lookups.
+	StatsHiddenOriginalTables []string
 	// ServiceDefinitions exposes the configured service endpoints.
 	ServiceDefinitions []ServiceDefinition
 
 	defaultRolePermissionsJSON = []byte(`{
-	  "anonymous": {
-	    "get": [],
-	    "getOwn": [],
-	    "post": [],
-	    "postOwn": [],
-	    "put": [],
-	    "putOwn": [],
-	    "patch": [],
-	    "patchOwn": [],
-	    "delete": [],
-	    "deleteOwn": []
+	  "roles": {
+	    "anonymous": {
+	      "get": [],
+	      "getOwn": [],
+	      "post": [],
+	      "postOwn": [],
+	      "put": [],
+	      "putOwn": [],
+	      "patch": [],
+	      "patchOwn": [],
+	      "delete": [],
+	      "deleteOwn": []
+	    },
+	    "user": {
+	      "get": ["example2"],
+	      "getOwn": ["example1", "exampleRelational", "auditLog", "apiKey"],
+	      "post": ["example2"],
+	      "postOwn": ["example1", "exampleRelational", "apiKey"],
+	      "put": [],
+	      "putOwn": ["example1", "example2", "exampleRelational"],
+	      "patch": [],
+	      "patchOwn": ["example1", "example2", "exampleRelational"],
+	      "delete": [],
+	      "deleteOwn": ["example1", "example2", "exampleRelational", "apiKey"]
+	    },
+	    "reviewer": {
+	      "get": ["example1", "example2", "exampleRelational"],
+	      "getOwn": [],
+	      "post": [],
+	      "postOwn": [],
+	      "put": [],
+	      "putOwn": [],
+	      "patch": [],
+	      "patchOwn": [],
+	      "delete": [],
+	      "deleteOwn": []
+	    },
+	    "admin": {
+	      "get": ["auditLog", "user", "example1", "example2", "exampleRelational", "apiKey"],
+	      "getOwn": [],
+	      "post": ["user", "example1", "example2", "exampleRelational", "apiKey"],
+	      "postOwn": [],
+	      "put": ["user", "example1", "example2", "exampleRelational"],
+	      "putOwn": [],
+	      "patch": ["user", "example1", "example2", "exampleRelational"],
+	      "patchOwn": [],
+	      "delete": ["user", "example1", "example2", "exampleRelational", "apiKey"],
+	      "deleteOwn": []
+	    }
 	  },
-	  "user": {
-	    "get": ["example2"],
-	    "getOwn": ["example1", "exampleRelational", "auditLog", "apiKey"],
-	    "post": ["example2"],
-	    "postOwn": ["example1", "exampleRelational", "apiKey"],
-	    "put": [],
-	    "putOwn": ["example1", "example2", "exampleRelational"],
-	    "patch": [],
-	    "patchOwn": ["example1", "example2", "exampleRelational"],
-	    "delete": [],
-	    "deleteOwn": ["example1", "example2", "exampleRelational", "apiKey"]
-	  },
-	  "reviewer": {
-	    "get": ["example1", "example2", "exampleRelational"],
-	    "getOwn": [],
-	    "post": [],
-	    "postOwn": [],
-	    "put": [],
-	    "putOwn": [],
-	    "patch": [],
-	    "patchOwn": [],
-	    "delete": [],
-	    "deleteOwn": []
-	  },
-	  "admin": {
-	    "get": ["auditLog", "user", "example1", "example2", "exampleRelational", "apiKey"],
-	    "getOwn": [],
-	    "post": ["user", "example1", "example2", "exampleRelational", "apiKey"],
-	    "postOwn": [],
-	    "put": ["user", "example1", "example2", "exampleRelational"],
-	    "putOwn": [],
-	    "patch": ["user", "example1", "example2", "exampleRelational"],
-	    "patchOwn": [],
-	    "delete": ["user", "example1", "example2", "exampleRelational", "apiKey"],
-	    "deleteOwn": []
+	  "stats": {
+	    "hidden": ["api_key"]
 	  }
 	}`)
 
@@ -163,10 +173,30 @@ func init() {
 }
 
 // LoadRolePermissions refreshes RolePermissions from disk or embedded defaults.
+type statsConfig struct {
+	Hidden []string `json:"hidden"`
+}
+
+type permissionsConfig struct {
+	Roles       map[string]Permissions `json:"roles"`
+	Stats       statsConfig            `json:"stats"`
+	StatsHidden []string               `json:"stats_hidden"`
+}
+
 func LoadRolePermissions() error {
 	data, err := readConfig(permissionsEnvKey, defaultPermissionsFile)
 	if err != nil {
 		return err
+	}
+
+	var cfg permissionsConfig
+	if err := json.Unmarshal(data, &cfg); err == nil && len(cfg.Roles) > 0 {
+		RolePermissions = cfg.Roles
+		combinedHidden := append([]string{}, cfg.StatsHidden...)
+		combinedHidden = append(combinedHidden, cfg.Stats.Hidden...)
+		StatsHiddenTables = normalizeHiddenTables(combinedHidden)
+		StatsHiddenOriginalTables = normalizeHiddenTablesOriginal(combinedHidden)
+		return nil
 	}
 
 	perms := make(map[string]Permissions)
@@ -174,6 +204,8 @@ func LoadRolePermissions() error {
 		return fmt.Errorf("models: parse role permissions: %w", err)
 	}
 	RolePermissions = perms
+	StatsHiddenTables = nil
+	StatsHiddenOriginalTables = nil
 	return nil
 }
 
@@ -190,6 +222,57 @@ func LoadServiceDefinitions() error {
 	}
 	ServiceDefinitions = defs
 	return nil
+}
+
+func normalizeHiddenTables(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{})
+	for _, v := range values {
+		trimmed := strings.ToLower(strings.TrimSpace(v))
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func normalizeHiddenTablesOriginal(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{})
+	for _, v := range values {
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func IsStatsHiddenTable(name string) bool {
+	if len(StatsHiddenTables) == 0 {
+		return false
+	}
+	lookup := strings.ToLower(strings.TrimSpace(name))
+	if lookup == "" {
+		return false
+	}
+	for _, hidden := range StatsHiddenTables {
+		if hidden == lookup {
+			return true
+		}
+	}
+	return false
 }
 
 func readConfig(envKey, defaultPath string) ([]byte, error) {

@@ -17,6 +17,7 @@ type TableStats struct {
 	TableName     string `json:"table_name"`
 	ExactRowCount int64  `json:"exact_row_count"`
 	PrimaryKey    string `json:"primary_key"`
+	Show          bool   `json:"show"`
 }
 
 // TableStatsAdmin is the detailed view for admins.
@@ -40,6 +41,7 @@ type TableStatsAdmin struct {
 	IndexCount     uint64     `json:"index_count"`
 	TotalSize      uint64     `json:"total_size_bytes"`
 	PrimaryKey     string     `json:"primary_key"`
+	Show           bool       `json:"show"`
 }
 
 // paginatedStatsResponse wraps the stats slice.
@@ -79,8 +81,12 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Map: table name -> access mode ("full" or "own")
-	accessByTable := map[string]string{}
+	type tableAccess struct {
+		tableName string
+		mode      string
+	}
+
+	accessByTable := make(map[string]*tableAccess)
 
 	getTableName := func(db *gorm.DB, model interface{}) (string, error) {
 		stmt := &gorm.Statement{DB: db}
@@ -90,27 +96,51 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 		return stmt.Schema.Table, nil
 	}
 
+	shouldSkip := func(table string) bool {
+		return strings.EqualFold(table, "api_key") && !models.IsStatsHiddenTable(table)
+	}
+
+	addTable := func(table, mode string) {
+		canonical := strings.ToLower(strings.TrimSpace(table))
+		if canonical == "" {
+			return
+		}
+		tableName := strings.TrimSpace(table)
+		if current, exists := accessByTable[canonical]; exists {
+			if current.mode == "full" {
+				return
+			}
+			if mode == "full" {
+				current.mode = "full"
+			}
+			return
+		}
+		accessByTable[canonical] = &tableAccess{tableName: tableName, mode: mode}
+	}
+
 	for _, res := range perms.GetOwn {
 		if modelPtr, exists := models.ModelMap[res]; exists {
 			if tbl, err := getTableName(c.BC.DB, modelPtr); err == nil {
-				if strings.EqualFold(tbl, "api_key") {
+				if shouldSkip(tbl) {
 					continue
 				}
-				if accessByTable[tbl] == "" {
-					accessByTable[tbl] = "own"
-				}
+				addTable(tbl, "own")
 			}
 		}
 	}
 	for _, res := range perms.Get {
 		if modelPtr, exists := models.ModelMap[res]; exists {
 			if tbl, err := getTableName(c.BC.DB, modelPtr); err == nil {
-				if strings.EqualFold(tbl, "api_key") {
+				if shouldSkip(tbl) {
 					continue
 				}
-				accessByTable[tbl] = "full"
+				addTable(tbl, "full")
 			}
 		}
+	}
+
+	for _, hidden := range models.StatsHiddenOriginalTables {
+		addTable(hidden, "full")
 	}
 
 	if len(accessByTable) == 0 {
@@ -141,8 +171,8 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	allowed := make([]string, 0, len(accessByTable))
-	for tbl := range accessByTable {
-		allowed = append(allowed, tbl)
+	for _, entry := range accessByTable {
+		allowed = append(allowed, entry.tableName)
 	}
 
 	var rawStats []rawStat
@@ -203,7 +233,11 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 	if isAdmin {
 		stats := make([]TableStatsAdmin, 0, len(rawStats))
 		for _, rs := range rawStats {
-			mode := accessByTable[rs.TableName]
+			entry, ok := accessByTable[strings.ToLower(rs.TableName)]
+			mode := "full"
+			if ok && entry != nil {
+				mode = entry.mode
+			}
 			var exactCount int64
 
 			if mode == "own" {
@@ -217,6 +251,7 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 					exactCount = -1
 				}
 			}
+			hidden := models.IsStatsHiddenTable(rs.TableName)
 
 			stats = append(stats, TableStatsAdmin{
 				TableName:      rs.TableName,
@@ -238,6 +273,7 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 				IndexCount:     rs.IndexCount,
 				TotalSize:      rs.DataLength + rs.IndexLength,
 				PrimaryKey:     rs.PKColumns,
+				Show:           !hidden,
 			})
 		}
 		writeStats(w, r, stats)
@@ -247,7 +283,11 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 	// Non admin payload
 	stats := make([]TableStats, 0, len(rawStats))
 	for _, rs := range rawStats {
-		mode := accessByTable[rs.TableName]
+		entry, ok := accessByTable[strings.ToLower(rs.TableName)]
+		mode := "full"
+		if ok && entry != nil {
+			mode = entry.mode
+		}
 		var exactCount int64
 
 		if mode == "own" {
@@ -261,11 +301,13 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 				exactCount = -1
 			}
 		}
+		hidden := models.IsStatsHiddenTable(rs.TableName)
 
 		stats = append(stats, TableStats{
 			TableName:     rs.TableName,
 			ExactRowCount: exactCount,
 			PrimaryKey:    rs.PKColumns,
+			Show:          !hidden,
 		})
 	}
 

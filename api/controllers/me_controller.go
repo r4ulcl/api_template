@@ -450,7 +450,16 @@ func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Clear sensitive fields
+	// Restrict TOTP secret visibility to admins only
+	roleVal := r.Context().Value(middlewares.ContextRole)
+	roleStr, _ := roleVal.(string)
+	if models.Role(strings.TrimSpace(roleStr)) != models.AdminRole {
+		user.TotpSecret = ""
+	} else {
+		user.TotpSecret = strings.TrimSpace(user.TotpSecret)
+	}
+
+	// Clear other sensitive fields
 	user.Password = ""
 
 	w.WriteHeader(http.StatusOK)
