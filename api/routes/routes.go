@@ -157,6 +157,11 @@ func contains(values []string, target string) bool {
 	return false
 }
 
+type roleBuckets struct {
+	full []string
+	own  []string
+}
+
 // -----------------------------------------------------------------------------
 // Public entry: SetupRouter
 // -----------------------------------------------------------------------------
@@ -169,176 +174,147 @@ func SetupRouter(
 	r := mux.NewRouter()
 	r.Use(mux.CORSMethodMiddleware(r))
 
-	if swagger {
-		r.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)
+	configureSwagger(r, swagger)
+	registerPublicAuthRoutes(r, authController, publicRegister)
+	registerAnonymousResources(r, baseController, authController, readLog)
+
+	authSub := newAuthSubrouter(r, jwtSecret, baseController)
+	registerMeRoutes(authSub, authController)
+	registerRoleProtectedResources(authSub, baseController, authController, readLog)
+	registerServiceDefinitions(authSub, baseController)
+	registerStatsRoute(r, baseController, jwtSecret, userGUI)
+
+	return r
+}
+
+func configureSwagger(r *mux.Router, enabled bool) {
+	if !enabled {
+		return
 	}
+	r.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)
+}
 
-	// Public auth endpoints
+func registerPublicAuthRoutes(r *mux.Router, authController *controllers.AuthController, publicRegister bool) {
 	r.HandleFunc("/login", authController.Login).Methods("POST")
-
 	if publicRegister {
 		r.HandleFunc("------------------------ /register", authController.Register).Methods("POST")
 	}
+}
 
-	// ---------- 1. Anonymous resources ----------
+func registerAnonymousResources(r *mux.Router, baseController *controllers.Controller, authController *controllers.AuthController, readLog bool) {
 	anon := models.RolePermissions["anonymous"]
 
 	for _, res := range anon.Get {
-		registerCRUD(r, baseController, authController, "GET", res, models.ModelMap[res], nil, nil, false, readLog)
+		registerCRUD(r, baseController, authController, http.MethodGet, res, models.ModelMap[res], nil, nil, false, readLog)
 	}
 	for _, res := range anon.Post {
-		registerCRUD(r, baseController, authController, "POST", res, models.ModelMap[res], nil, nil, false, readLog)
+		registerCRUD(r, baseController, authController, http.MethodPost, res, models.ModelMap[res], nil, nil, false, readLog)
 	}
 	for _, res := range anon.Put {
-		registerCRUD(r, baseController, authController, "PUT", res, models.ModelMap[res], nil, nil, true, readLog)
+		registerCRUD(r, baseController, authController, http.MethodPut, res, models.ModelMap[res], nil, nil, true, readLog)
 	}
 	for _, res := range anon.Patch {
-		registerCRUD(r, baseController, authController, "PATCH", res, models.ModelMap[res], nil, nil, false, readLog)
+		registerCRUD(r, baseController, authController, http.MethodPatch, res, models.ModelMap[res], nil, nil, false, readLog)
 	}
 	for _, res := range anon.Delete {
-		registerCRUD(r, baseController, authController, "DELETE", res, models.ModelMap[res], nil, nil, false, readLog)
+		registerCRUD(r, baseController, authController, http.MethodDelete, res, models.ModelMap[res], nil, nil, false, readLog)
 	}
+}
 
-	// ---------- 2. Authenticated resources ----------
+func newAuthSubrouter(r *mux.Router, jwtSecret string, baseController *controllers.Controller) *mux.Router {
 	authSub := r.NewRoute().Subrouter()
 	authSub.Use(middlewares.AuthMiddleware(jwtSecret, baseController.BC.DB))
+	return authSub
+}
 
-	// me endpoints
-	// Me endpoints available to any logged in user
-	authSub.HandleFunc("/me", authController.Me).Methods("GET", "PATCH")
-
-	// Collect all non-anonymous roles for own access on /me routes
-	allAuthRoles := make([]string, 0, len(models.RolePermissions))
-	for role := range models.RolePermissions {
-		if role != "anonymous" {
-			allAuthRoles = append(allAuthRoles, role)
-		}
-	}
-	// Wrap DeleteAPIKey with OwnScopeMiddleware so only owners can delete their key
+func registerMeRoutes(authSub *mux.Router, authController *controllers.AuthController) {
+	authSub.HandleFunc("/me", authController.Me).Methods(http.MethodGet, http.MethodPatch)
+	roles := collectNonAnonymousRoles()
 	authSub.Handle(
 		"/me/api-key/{apiKey}",
-		middlewares.OwnScopeMiddleware(nil, allAuthRoles)(http.HandlerFunc(authController.DeleteAPIKey)),
+		middlewares.OwnScopeMiddleware(nil, roles)(http.HandlerFunc(authController.DeleteAPIKey)),
 	).Methods(http.MethodDelete)
-
 	authSub.Handle(
 		"/me/api-key",
-		middlewares.OwnScopeMiddleware(nil, allAuthRoles)(http.HandlerFunc(authController.GenerateAPIKey)),
+		middlewares.OwnScopeMiddleware(nil, roles)(http.HandlerFunc(authController.GenerateAPIKey)),
 	).Methods(http.MethodPost)
+}
 
-	// Build method -> resource -> {full, own} role lists
-	type both struct {
-		full []string
-		own  []string
+func collectNonAnonymousRoles() []string {
+	roles := make([]string, 0, len(models.RolePermissions))
+	for role := range models.RolePermissions {
+		if role == "anonymous" {
+			continue
+		}
+		roles = append(roles, role)
 	}
-	methodRoles := map[string]map[string]*both{
-		"GET": {}, "POST": {}, "PUT": {}, "PATCH": {}, "DELETE": {},
+	return roles
+}
+
+func registerRoleProtectedResources(authSub *mux.Router, baseController *controllers.Controller, authController *controllers.AuthController, readLog bool) {
+	matrix := buildRoleMatrix()
+	for method, resources := range matrix {
+		registerMethodResources(method, resources, authSub, baseController, authController, readLog)
 	}
+}
+
+func buildRoleMatrix() map[string]map[string]*roleBuckets {
+	matrix := map[string]map[string]*roleBuckets{
+		http.MethodGet:    {},
+		http.MethodPost:   {},
+		http.MethodPut:    {},
+		http.MethodPatch:  {},
+		http.MethodDelete: {},
+	}
+
 	for role, perms := range models.RolePermissions {
 		if role == "anonymous" {
 			continue
 		}
 
-		for _, rsc := range perms.Get {
-			entry := methodRoles["GET"][rsc]
-			if entry == nil {
-				entry = &both{}
-				methodRoles["GET"][rsc] = entry
+		appendResource := func(method string, resources []string, target func(*roleBuckets) *[]string) {
+			for _, res := range resources {
+				entry := matrix[method][res]
+				if entry == nil {
+					entry = &roleBuckets{}
+					matrix[method][res] = entry
+				}
+				bucket := target(entry)
+				*bucket = append(*bucket, role)
 			}
-			entry.full = append(entry.full, role)
-		}
-		for _, rsc := range perms.Post {
-			entry := methodRoles["POST"][rsc]
-			if entry == nil {
-				entry = &both{}
-				methodRoles["POST"][rsc] = entry
-			}
-			entry.full = append(entry.full, role)
-		}
-		for _, rsc := range perms.Put {
-			entry := methodRoles["PUT"][rsc]
-			if entry == nil {
-				entry = &both{}
-				methodRoles["PUT"][rsc] = entry
-			}
-			entry.full = append(entry.full, role)
-		}
-		for _, rsc := range perms.Patch {
-			entry := methodRoles["PATCH"][rsc]
-			if entry == nil {
-				entry = &both{}
-				methodRoles["PATCH"][rsc] = entry
-			}
-			entry.full = append(entry.full, role)
-		}
-		for _, rsc := range perms.Delete {
-			entry := methodRoles["DELETE"][rsc]
-			if entry == nil {
-				entry = &both{}
-				methodRoles["DELETE"][rsc] = entry
-			}
-			entry.full = append(entry.full, role)
 		}
 
-		// Own permissions
-		for _, rsc := range perms.GetOwn {
-			entry := methodRoles["GET"][rsc]
-			if entry == nil {
-				entry = &both{}
-				methodRoles["GET"][rsc] = entry
-			}
-			entry.own = append(entry.own, role)
-		}
-		for _, rsc := range perms.PostOwn {
-			entry := methodRoles["POST"][rsc]
-			if entry == nil {
-				entry = &both{}
-				methodRoles["POST"][rsc] = entry
-			}
-			entry.own = append(entry.own, role)
-		}
-		for _, rsc := range perms.PutOwn {
-			entry := methodRoles["PUT"][rsc]
-			if entry == nil {
-				entry = &both{}
-				methodRoles["PUT"][rsc] = entry
-			}
-			entry.own = append(entry.own, role)
-		}
-		for _, rsc := range perms.PatchOwn {
-			entry := methodRoles["PATCH"][rsc]
-			if entry == nil {
-				entry = &both{}
-				methodRoles["PATCH"][rsc] = entry
-			}
-			entry.own = append(entry.own, role)
-		}
-		for _, rsc := range perms.DeleteOwn {
-			entry := methodRoles["DELETE"][rsc]
-			if entry == nil {
-				entry = &both{}
-				methodRoles["DELETE"][rsc] = entry
-			}
-			entry.own = append(entry.own, role)
-		}
+		appendResource(http.MethodGet, perms.Get, func(rb *roleBuckets) *[]string { return &rb.full })
+		appendResource(http.MethodPost, perms.Post, func(rb *roleBuckets) *[]string { return &rb.full })
+		appendResource(http.MethodPut, perms.Put, func(rb *roleBuckets) *[]string { return &rb.full })
+		appendResource(http.MethodPatch, perms.Patch, func(rb *roleBuckets) *[]string { return &rb.full })
+		appendResource(http.MethodDelete, perms.Delete, func(rb *roleBuckets) *[]string { return &rb.full })
+
+		appendResource(http.MethodGet, perms.GetOwn, func(rb *roleBuckets) *[]string { return &rb.own })
+		appendResource(http.MethodPost, perms.PostOwn, func(rb *roleBuckets) *[]string { return &rb.own })
+		appendResource(http.MethodPut, perms.PutOwn, func(rb *roleBuckets) *[]string { return &rb.own })
+		appendResource(http.MethodPatch, perms.PatchOwn, func(rb *roleBuckets) *[]string { return &rb.own })
+		appendResource(http.MethodDelete, perms.DeleteOwn, func(rb *roleBuckets) *[]string { return &rb.own })
 	}
 
-	// Register every method/resource on authSub with both role sets
-	for res, rs := range methodRoles["GET"] {
-		registerCRUD(authSub, baseController, authController, "GET", res, models.ModelMap[res], rs.full, rs.own, false, readLog)
-	}
-	for res, rs := range methodRoles["POST"] {
-		registerCRUD(authSub, baseController, authController, "POST", res, models.ModelMap[res], rs.full, rs.own, false, readLog)
-	}
-	for res, rs := range methodRoles["PUT"] {
-		registerCRUD(authSub, baseController, authController, "PUT", res, models.ModelMap[res], rs.full, rs.own, true, readLog)
-	}
-	for res, rs := range methodRoles["PATCH"] {
-		registerCRUD(authSub, baseController, authController, "PATCH", res, models.ModelMap[res], rs.full, rs.own, false, readLog)
-	}
-	for res, rs := range methodRoles["DELETE"] {
-		registerCRUD(authSub, baseController, authController, "DELETE", res, models.ModelMap[res], rs.full, rs.own, false, readLog)
-	}
+	return matrix
+}
 
+func registerMethodResources(
+	method string,
+	resources map[string]*roleBuckets,
+	router *mux.Router,
+	baseController *controllers.Controller,
+	authController *controllers.AuthController,
+	readLog bool,
+) {
+	for resource, roles := range resources {
+		overwrite := method == http.MethodPut
+		registerCRUD(router, baseController, authController, method, resource, models.ModelMap[resource], roles.full, roles.own, overwrite, readLog)
+	}
+}
+
+func registerServiceDefinitions(authSub *mux.Router, baseController *controllers.Controller) {
 	for _, svc := range models.ServiceDefinitions {
 		handler, ok := controllers.GetServiceHandler(svc.Handler, baseController)
 		if !ok {
@@ -353,18 +329,13 @@ func SetupRouter(
 		h := serviceAccessMiddleware(svc.Access)(handler)
 		authSub.Handle(svc.Path, h).Methods(method)
 	}
+}
 
-	// ---------- 3. /stats endpoint ----------
-	if userGUI {
-		sub := r.NewRoute().Subrouter()
-		sub.Use(middlewares.AuthMiddleware(jwtSecret, baseController.BC.DB))
-		sub.HandleFunc("/stats", baseController.GetDBStats).Methods("GET")
-	} else {
-		sub := r.NewRoute().Subrouter()
-		sub.Use(middlewares.AuthMiddleware(jwtSecret, baseController.BC.DB))
+func registerStatsRoute(r *mux.Router, baseController *controllers.Controller, jwtSecret string, userGUI bool) {
+	sub := r.NewRoute().Subrouter()
+	sub.Use(middlewares.AuthMiddleware(jwtSecret, baseController.BC.DB))
+	if !userGUI {
 		sub.Use(middlewares.RoleMiddleware("admin"))
-		sub.HandleFunc("/stats", baseController.GetDBStats).Methods("GET")
 	}
-
-	return r
+	sub.HandleFunc("/stats", baseController.GetDBStats).Methods(http.MethodGet)
 }
