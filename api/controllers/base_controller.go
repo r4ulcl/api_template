@@ -137,6 +137,65 @@ func ownOnlyAndUserID(r *http.Request) (bool, string) {
 	return ownOnly, userID
 }
 
+func readBodyBytes(r *http.Request) ([]byte, error) {
+	if r.Body == nil {
+		return nil, fmt.Errorf("request body is empty")
+	}
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func enforceCreatedBy(model interface{}, userID string) {
+	v := reflect.ValueOf(model)
+	if !v.IsValid() {
+		return
+	}
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return
+	}
+	if f := v.FieldByName("CreatedBy"); f.IsValid() && f.CanSet() && f.Kind() == reflect.String {
+		f.SetString(userID)
+	}
+}
+
+func setAuditOnCreateWithOwner(model interface{}, userID string) {
+	setAuditOnCreate(model, userID)
+	enforceCreatedBy(model, userID)
+}
+
+func newModelInstance(model interface{}) (interface{}, bool) {
+	modelType := reflect.TypeOf(model)
+	if modelType == nil || modelType.Kind() != reflect.Ptr {
+		return nil, false
+	}
+	return reflect.New(modelType.Elem()).Interface(), true
+}
+
+func setAuditForSliceElement(elem reflect.Value, userID string) {
+	if !elem.IsValid() {
+		return
+	}
+	// Unwrap interface values so Addr/Elem checks work consistently
+	if elem.Kind() == reflect.Interface && !elem.IsNil() {
+		elem = elem.Elem()
+	}
+	if elem.Kind() == reflect.Ptr {
+		if !elem.IsNil() {
+			setAuditOnCreateWithOwner(elem.Interface(), userID)
+		}
+		return
+	}
+	if elem.CanAddr() {
+		setAuditOnCreateWithOwner(elem.Addr().Interface(), userID)
+	}
+}
+
 // zeroAuditFields sets CreatedAt, LastUpdate, CreatedBy to their zero values
 // and leaves EditedBy untouched so callers can set it when needed.
 func zeroAuditFields(model interface{}) {
@@ -227,7 +286,10 @@ func hasOwnership(model interface{}, userID string) bool {
 
 // ownsByID loads the record by ID and returns true only if CreatedBy matches userID.
 func ownsByID(c *Controller, model interface{}, tokenizedID string, userID string) bool {
-	temp := reflect.New(reflect.TypeOf(model).Elem()).Interface()
+	temp, ok := newModelInstance(model)
+	if !ok {
+		return false
+	}
 	if err := c.BC.GetRecordsByID(temp, tokenizedID); err != nil {
 		return false
 	}
@@ -261,132 +323,87 @@ func (c *Controller) Create(w http.ResponseWriter, r *http.Request, model interf
 
 	_, userID := ownOnlyAndUserID(r)
 
-	// 1) Read raw body to detect if it's an array or single object
-	var buf bytes.Buffer
-	tee := io.TeeReader(r.Body, &buf)
-	firstBytes := make([]byte, 1)
-
-	for {
-		n, err := tee.Read(firstBytes)
-		if err != nil && err != io.EOF {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Unable to read request body"})
-			return
-		}
-		if n == 0 {
-			break
-		}
-		if bytes.TrimSpace(firstBytes)[0] == '[' || bytes.TrimSpace(firstBytes)[0] == '{' {
-			break
-		}
-	}
-	r.Body = io.NopCloser(io.MultiReader(&buf, r.Body))
-
-	trimmedFirst := bytes.TrimSpace(firstBytes)
-	if len(trimmedFirst) > 0 && trimmedFirst[0] == '[' {
-		// Bulk insert path
-
-		modelVal := reflect.ValueOf(model)
-		if modelVal.Kind() != reflect.Ptr {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Model must be a pointer"})
-			return
-		}
-		elemType := modelVal.Type().Elem()
-		sliceType := reflect.SliceOf(elemType)
-		slicePtr := reflect.New(sliceType)
-
-		if err := json.NewDecoder(r.Body).Decode(slicePtr.Interface()); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid JSON array: " + err.Error()})
-			return
-		}
-
-		// Set audit fields and enforce ownership
-		slice := slicePtr.Elem()
-		for i := 0; i < slice.Len(); i++ {
-			elem := slice.Index(i)
-			if elem.CanAddr() {
-				setAuditOnCreate(elem.Addr().Interface(), userID)
-			}
-			// Always force CreatedBy to current user so clients cannot spoof ownership
-			if elem.CanAddr() {
-				ev := elem
-				if ev.Kind() == reflect.Ptr {
-					ev = ev.Elem()
-				}
-				if f := ev.FieldByName("CreatedBy"); f.IsValid() && f.CanSet() && f.Kind() == reflect.String {
-					f.SetString(userID)
-				}
-			}
-		}
-
-		tx := c.BC.DB.Create(slicePtr.Interface())
-		if tx.Error != nil {
-			if strings.Contains(tx.Error.Error(), "duplicate") {
-				w.WriteHeader(http.StatusConflict)
-				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: tx.Error.Error()})
-				// Audit conflict
-				logAudit(c, r, userID, "create", resource, "", http.StatusConflict, nil)
-				return
-			}
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: tx.Error.Error()})
-			// Audit error
-			logAudit(c, r, userID, "create", resource, "", http.StatusInternalServerError, nil)
-			return
-		}
-
-		// Audit each created element
-		for i := 0; i < slice.Len(); i++ {
-			elem := slice.Index(i).Interface()
-			rid := getIDString(elem)
-			ch := &auditChange{After: elem}
-			logAudit(c, r, userID, "create", resource, rid, http.StatusCreated, ch)
-		}
-
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(slicePtr.Interface())
-		return
-	}
-
-	// Single object path
-
-	if err := json.NewDecoder(r.Body).Decode(model); err != nil {
+	payload, err := readBodyBytes(r)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		log.Println("r.Body", r.Body)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid JSON object: " + err.Error()})
-		// Audit bad request
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Unable to read request body"})
 		logAudit(c, r, userID, "create", resource, "", http.StatusBadRequest, nil)
 		return
 	}
 
-	// Set audit fields and enforce ownership
-	setAuditOnCreate(model, userID)
-	// Force CreatedBy to current user for safety
-	if v := reflect.ValueOf(model); v.IsValid() {
-		ev := v
-		if ev.Kind() == reflect.Ptr {
-			ev = ev.Elem()
-		}
-		if ev.IsValid() {
-			if f := ev.FieldByName("CreatedBy"); f.IsValid() && f.CanSet() && f.Kind() == reflect.String {
-				f.SetString(userID)
-			}
-		}
+	// Restore body for potential downstream readers and simplify detection logic
+	r.Body = io.NopCloser(bytes.NewReader(payload))
+	trimmed := bytes.TrimSpace(payload)
+
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		c.handleBulkCreate(w, r, model, userID, resource, payload)
+		return
 	}
 
-	// Create or update according to flag
-	if err := c.BC.CreateOrUpdateRecord(model, overwrite); err != nil {
-		if strings.Contains(err.Error(), "duplicate") {
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
-			logAudit(c, r, userID, "create", resource, "", http.StatusConflict, nil)
-			return
-		}
+	c.handleSingleCreate(w, r, model, userID, resource, payload, overwrite)
+}
+
+func (c *Controller) handleBulkCreate(w http.ResponseWriter, r *http.Request, model interface{}, userID, resource string, payload []byte) {
+	modelVal := reflect.ValueOf(model)
+	if modelVal.Kind() != reflect.Ptr {
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Model must be a pointer"})
 		logAudit(c, r, userID, "create", resource, "", http.StatusInternalServerError, nil)
+		return
+	}
+
+	slicePtr := reflect.New(reflect.SliceOf(modelVal.Type().Elem()))
+	if err := json.Unmarshal(payload, slicePtr.Interface()); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid JSON array: " + err.Error()})
+		logAudit(c, r, userID, "create", resource, "", http.StatusBadRequest, nil)
+		return
+	}
+
+	slice := slicePtr.Elem()
+	for i := 0; i < slice.Len(); i++ {
+		setAuditForSliceElement(slice.Index(i), userID)
+	}
+
+	if tx := c.BC.DB.Create(slicePtr.Interface()); tx.Error != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(tx.Error.Error(), "duplicate") {
+			status = http.StatusConflict
+		}
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: tx.Error.Error()})
+		logAudit(c, r, userID, "create", resource, "", status, nil)
+		return
+	}
+
+	for i := 0; i < slice.Len(); i++ {
+		elem := slice.Index(i).Interface()
+		rid := getIDString(elem)
+		logAudit(c, r, userID, "create", resource, rid, http.StatusCreated, &auditChange{After: elem})
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(slicePtr.Interface())
+}
+
+func (c *Controller) handleSingleCreate(w http.ResponseWriter, r *http.Request, model interface{}, userID, resource string, payload []byte, overwrite bool) {
+	if err := json.Unmarshal(payload, model); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid JSON object: " + err.Error()})
+		logAudit(c, r, userID, "create", resource, "", http.StatusBadRequest, nil)
+		return
+	}
+
+	setAuditOnCreateWithOwner(model, userID)
+
+	if err := c.BC.CreateOrUpdateRecord(model, overwrite); err != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "duplicate") {
+			status = http.StatusConflict
+		}
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
+		logAudit(c, r, userID, "create", resource, "", status, nil)
 		return
 	}
 
@@ -423,6 +440,133 @@ type paginationLinks struct {
 	Last  string `json:"last"`
 }
 
+func parsePaginationParams(query url.Values) (int, int) {
+	page := 1
+	perPage := 1000
+
+	if v := query.Get("page"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+
+	if v := query.Get("page_size"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			perPage = parsed
+		}
+	}
+
+	return page, perPage
+}
+
+func applyQueryFilters(db *gorm.DB, query url.Values) *gorm.DB {
+	for key, vals := range query {
+		if len(vals) == 0 || !strings.HasPrefix(key, "filter[") {
+			continue
+		}
+
+		inside := strings.TrimPrefix(key, "filter[")
+		if !strings.HasSuffix(inside, "]") {
+			continue
+		}
+		inside = inside[:len(inside)-1]
+		parts := strings.SplitN(inside, "][", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		field := parts[0]
+		operator := parts[1]
+		value := vals[0]
+
+		switch operator {
+		case "eq":
+			db = db.Where(fmt.Sprintf("%s = ?", field), value)
+		case "ne", "neq":
+			db = db.Where(fmt.Sprintf("%s <> ?", field), value)
+		case "contains":
+			db = db.Where(fmt.Sprintf("%s LIKE ?", field), "%"+value+"%")
+		case "ncontains":
+			db = db.Where(fmt.Sprintf("%s NOT LIKE ?", field), "%"+value+"%")
+		case "gt":
+			db = db.Where(fmt.Sprintf("%s > ?", field), value)
+		case "gte":
+			db = db.Where(fmt.Sprintf("%s >= ?", field), value)
+		case "lt":
+			db = db.Where(fmt.Sprintf("%s < ?", field), value)
+		case "lte":
+			db = db.Where(fmt.Sprintf("%s <= ?", field), value)
+		case "in":
+			list := strings.Split(value, ",")
+			db = db.Where(fmt.Sprintf("%s IN ?", field), list)
+		case "nin":
+			list := strings.Split(value, ",")
+			db = db.Where(fmt.Sprintf("%s NOT IN ?", field), list)
+		case "isnull":
+			vLower := strings.ToLower(value)
+			if vLower == "true" || vLower == "1" {
+				db = db.Where(fmt.Sprintf("%s IS NULL", field))
+			} else {
+				db = db.Where(fmt.Sprintf("%s IS NOT NULL", field))
+			}
+		}
+	}
+	return db
+}
+
+func applySortParam(db *gorm.DB, sortParam string) *gorm.DB {
+	sortParam = strings.TrimSpace(sortParam)
+	if sortParam == "" {
+		return db
+	}
+
+	fields := strings.Split(sortParam, ",")
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		if strings.HasPrefix(field, "-") {
+			db = db.Order(fmt.Sprintf("%s DESC", strings.TrimPrefix(field, "-")))
+		} else {
+			db = db.Order(fmt.Sprintf("%s ASC", field))
+		}
+	}
+
+	return db
+}
+
+func buildPaginationLinks(basePath string, query url.Values, page, perPage, totalPages int) paginationLinks {
+	qs := copyQueryExcluding(query, []string{"page", "page_size"})
+
+	makeLink := func(p int) string {
+		local := url.Values{}
+		for key, values := range qs {
+			for _, v := range values {
+				local.Add(key, v)
+			}
+		}
+		local.Set("page", strconv.Itoa(p))
+		local.Set("page_size", strconv.Itoa(perPage))
+		return basePath + "?" + local.Encode()
+	}
+
+	links := paginationLinks{
+		Self:  makeLink(page),
+		First: makeLink(1),
+		Last:  makeLink(totalPages),
+	}
+
+	if page > 1 {
+		links.Prev = makeLink(page - 1)
+	}
+	if page < totalPages {
+		links.Next = makeLink(page + 1)
+	}
+
+	return links
+}
+
 // GetAll retrieves all records with optional filtering, sorting, and pagination.
 // @Summary     Get a paginated list of records
 // @Description Retrieves records of a given resource, supporting complex filters, sorting, and pagination.
@@ -450,131 +594,33 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 
 	ownOnly, userID := ownOnlyAndUserID(r)
 
-	// 1) Parse "page" and "page_size" parameters
 	queryVals := r.URL.Query()
-	pageParam := queryVals.Get("page")
-	perPageParam := queryVals.Get("page_size")
+	page, perPage := parsePaginationParams(queryVals)
 
-	page := 1
-	perPage := 1000
-
-	if p, err := strconv.Atoi(pageParam); err == nil && p > 0 {
-		page = p
-	}
-	if pp, err := strconv.Atoi(perPageParam); err == nil && pp > 0 {
-		perPage = pp
-	}
-
-	// 2) Prepare base GORM instance and apply filters and sort
 	baseModel := c.BC.DB.Model(model)
-
-	// Ownership scope for list
 	if ownOnly && userID != "" {
 		baseModel = baseModel.Where(ownerColumn+" = ?", userID)
 	}
 
-	// 2a) Apply advanced filters
-	applyFilters := func(db *gorm.DB) *gorm.DB {
-		for rawKey, vals := range queryVals {
-			if rawKey == "page" || rawKey == "page_size" || rawKey == "sort" {
-				continue
-			}
-			if !strings.HasPrefix(rawKey, "filter[") {
-				continue
-			}
-			inside := strings.TrimPrefix(rawKey, "filter[")
-			if !strings.HasSuffix(inside, "]") {
-				continue
-			}
-			inside = inside[:len(inside)-1]
-			parts := strings.SplitN(inside, "][", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			field := parts[0]
-			operator := parts[1]
-			value := vals[0]
-
-			switch operator {
-			case "eq":
-				db = db.Where(fmt.Sprintf("%s = ?", field), value)
-			case "ne", "neq":
-				db = db.Where(fmt.Sprintf("%s <> ?", field), value)
-			case "contains":
-				db = db.Where(fmt.Sprintf("%s LIKE ?", field), "%"+value+"%")
-			case "ncontains":
-				db = db.Where(fmt.Sprintf("%s NOT LIKE ?", field), "%"+value+"%")
-			case "gt":
-				db = db.Where(fmt.Sprintf("%s > ?", field), value)
-			case "gte":
-				db = db.Where(fmt.Sprintf("%s >= ?", field), value)
-			case "lt":
-				db = db.Where(fmt.Sprintf("%s < ?", field), value)
-			case "lte":
-				db = db.Where(fmt.Sprintf("%s <= ?", field), value)
-			case "in":
-				list := strings.Split(value, ",")
-				db = db.Where(fmt.Sprintf("%s IN ?", field), list)
-			case "nin":
-				list := strings.Split(value, ",")
-				db = db.Where(fmt.Sprintf("%s NOT IN ?", field), list)
-			case "isnull":
-				vLower := strings.ToLower(value)
-				if vLower == "true" || vLower == "1" {
-					db = db.Where(fmt.Sprintf("%s IS NULL", field))
-				} else {
-					db = db.Where(fmt.Sprintf("%s IS NOT NULL", field))
-				}
-			default:
-				continue
-			}
-		}
-		return db
-	}
-
-	// 2b) Apply sorting
-	applySort := func(db *gorm.DB) *gorm.DB {
-		sortParam := queryVals.Get("sort")
-		if strings.TrimSpace(sortParam) == "" {
-			return db
-		}
-		fields := strings.Split(sortParam, ",")
-		for _, f := range fields {
-			f = strings.TrimSpace(f)
-			if f == "" {
-				continue
-			}
-			if strings.HasPrefix(f, "-") {
-				fieldName := strings.TrimPrefix(f, "-")
-				db = db.Order(fmt.Sprintf("%s DESC", fieldName))
-			} else {
-				db = db.Order(fmt.Sprintf("%s ASC", f))
-			}
-		}
-		return db
-	}
-
-	// 3) Count total items
-	countDB := baseModel.Session(&gorm.Session{})
-	countDB = applyFilters(countDB)
+	countDB := applyQueryFilters(baseModel.Session(&gorm.Session{}), queryVals)
 
 	var totalItems int64
 	if err := countDB.Count(&totalItems).Error; err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
-		// Audit error
 		logAudit(c, r, userID, "read", resource, "", http.StatusInternalServerError, nil)
 		return
 	}
 
-	// 4) Calculate pagination offsets
 	offset := (page - 1) * perPage
-	totalPages := int((totalItems + int64(perPage) - 1) / int64(perPage))
+	totalPages := 0
+	if perPage > 0 {
+		totalPages = int((totalItems + int64(perPage) - 1) / int64(perPage))
+	}
 
-	// 5) Fetch page
 	dataDB := baseModel.Session(&gorm.Session{})
-	dataDB = applyFilters(dataDB)
-	dataDB = applySort(dataDB)
+	dataDB = applyQueryFilters(dataDB, queryVals)
+	dataDB = applySortParam(dataDB, queryVals.Get("sort"))
 	dataDB = dataDB.Limit(perPage).Offset(offset)
 
 	if err := dataDB.Find(model).Error; err != nil {
@@ -584,37 +630,6 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 		return
 	}
 
-	// 6) Build pagination links
-	basePath := r.URL.Path
-	qs := copyQueryExcluding(queryVals, []string{"page", "page_size"})
-
-	makeLink := func(p int) string {
-		local := url.Values{}
-		for key, vals := range qs {
-			for _, v := range vals {
-				local.Add(key, v)
-			}
-		}
-		local.Set("page", strconv.Itoa(p))
-		local.Set("page_size", strconv.Itoa(perPage))
-		return basePath + "?" + local.Encode()
-	}
-
-	selfLink := makeLink(page)
-	firstLink := makeLink(1)
-	lastLink := makeLink(totalPages)
-
-	prevLink := ""
-	if page > 1 {
-		prevLink = makeLink(page - 1)
-	}
-
-	nextLink := ""
-	if page < totalPages {
-		nextLink = makeLink(page + 1)
-	}
-
-	// 7) Return paginated response
 	resp := paginatedResponse{
 		Data: model,
 		Meta: paginationMeta{
@@ -623,19 +638,12 @@ func (c *Controller) GetAll(w http.ResponseWriter, r *http.Request, model interf
 			TotalItems:  totalItems,
 			TotalPages:  totalPages,
 		},
-		Links: paginationLinks{
-			Self:  selfLink,
-			First: firstLink,
-			Prev:  prevLink,
-			Next:  nextLink,
-			Last:  lastLink,
-		},
+		Links: buildPaginationLinks(r.URL.Path, queryVals, page, perPage, totalPages),
 	}
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
 
-	// Audit a list read with no specific ResourceID
 	if readLog {
 		logAudit(c, r, userID, "read", resource, "", http.StatusOK, nil)
 	}
@@ -750,7 +758,13 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 	}
 
 	// Load "before" state
-	before := reflect.New(reflect.TypeOf(model).Elem()).Interface()
+	before, ok := newModelInstance(model)
+	if !ok {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Model must be a pointer"})
+		logAudit(c, r, userID, "update", resource, tokenizedID, http.StatusInternalServerError, nil)
+		return
+	}
 	if err := c.BC.GetRecordsByID(before, tokenizedID); err != nil {
 		// Could not load before
 		w.WriteHeader(http.StatusNotFound)
@@ -783,7 +797,13 @@ func (c *Controller) Update(w http.ResponseWriter, r *http.Request, model interf
 	}
 
 	// After state
-	after := reflect.New(reflect.TypeOf(model).Elem()).Interface()
+	after, ok := newModelInstance(model)
+	if !ok {
+		logAudit(c, r, userID, "update", resource, tokenizedID, http.StatusOK, &auditChange{Before: before})
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(model)
+		return
+	}
 	if err := c.BC.GetRecordsByID(after, tokenizedID); err != nil {
 		// If we cannot fetch after, still return success but log with before only
 		logAudit(c, r, userID, "update", resource, tokenizedID, http.StatusOK, &auditChange{Before: before})
@@ -829,7 +849,13 @@ func (c *Controller) Delete(w http.ResponseWriter, r *http.Request, model interf
 	}
 
 	// Load "before" snapshot
-	before := reflect.New(reflect.TypeOf(model).Elem()).Interface()
+	before, ok := newModelInstance(model)
+	if !ok {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Model must be a pointer"})
+		logAudit(c, r, userID, "delete", resource, tokenizedID, http.StatusInternalServerError, nil)
+		return
+	}
 	if err := c.BC.GetRecordsByID(before, tokenizedID); err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: err.Error()})
