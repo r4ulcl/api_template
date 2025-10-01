@@ -155,8 +155,8 @@ const docTemplate = `{
                     }
                 }
             },
-            "post": {
-                "description": "Allows the authenticated user to change email and/or password. To change password, both current and new passwords are required.",
+            "patch": {
+                "description": "Allows the authenticated user to change email and/or password. To change password, both current and new passwords are required. Mint a TOTP secret with ` + "`" + `totp_reset_secret` + "`" + ` and include ` + "`" + `totp_code` + "`" + ` when enabling or disabling MFA.",
                 "consumes": [
                     "application/json"
                 ],
@@ -214,7 +214,7 @@ const docTemplate = `{
         },
         "/me/api-key": {
             "post": {
-                "description": "Allows the authenticated user to generate a new API key without expiration for use in scripts or integrations.",
+                "description": "Allows the authenticated user to mint a new API key after providing a description and optional expiration timestamp.",
                 "consumes": [
                     "application/json"
                 ],
@@ -226,14 +226,22 @@ const docTemplate = `{
                     "auth"
                 ],
                 "summary": "Generate API key",
-                "responses": {
-                    "200": {
-                        "description": "API key successfully created",
+                "parameters": [
+                    {
+                        "description": "API key details",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/models.CreateAPIKeyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "API key metadata (token omitted)",
+                        "schema": {
+                            "$ref": "#/definitions/models.APIKeyResponse"
                         }
                     },
                     "400": {
@@ -629,7 +637,7 @@ const docTemplate = `{
                 }
             },
             "delete": {
-                "description": "Deletes a resource identified by its primary key. Supports composite keys via hyphen-separated format.",
+                "description": "Deletes a resource identified by its primary key. Supports composite keys via hyphen-separated composite format.",
                 "consumes": [
                     "application/json"
                 ],
@@ -732,6 +740,45 @@ const docTemplate = `{
                 }
             }
         },
+        "models.APIKeyResponse": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "expiracy": {
+                    "type": "string"
+                },
+                "last_used": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.CreateAPIKeyRequest": {
+            "type": "object",
+            "required": [
+                "description"
+            ],
+            "properties": {
+                "description": {
+                    "description": "Description is a human readable label to identify the key's intent.",
+                    "type": "string"
+                },
+                "expiracy": {
+                    "description": "Expiracy is an optional UTC timestamp when the key becomes invalid.",
+                    "type": "string"
+                }
+            }
+        },
         "models.ErrorResponse": {
             "type": "object",
             "properties": {
@@ -761,6 +808,10 @@ const docTemplate = `{
                     "description": "Password is the user's password used for authentication.",
                     "type": "string"
                 },
+                "totp_code": {
+                    "description": "TotpCode is required when Time-based OTP is enabled for the account.",
+                    "type": "string"
+                },
                 "username": {
                     "description": "Username is the unique identifier for the user attempting to log in.",
                     "type": "string"
@@ -770,20 +821,16 @@ const docTemplate = `{
         "models.Role": {
             "type": "string",
             "enum": [
+                "user",
+                "reviewer",
                 "admin",
-                "user"
-            ],
-            "x-enum-comments": {
-                "AdminRole": "@Enum admin",
-                "UserRole": "@Enum user"
-            },
-            "x-enum-descriptions": [
-                "@Enum admin",
-                "@Enum user"
+                "*"
             ],
             "x-enum-varnames": [
+                "UserRole",
+                "ReviewerRole",
                 "AdminRole",
-                "UserRole"
+                "DefaultRoleWhitelist"
             ]
         },
         "models.UpdateUser": {
@@ -825,6 +872,18 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "totp_code": {
+                    "type": "string"
+                },
+                "totp_enabled": {
+                    "type": "boolean"
+                },
+                "totp_reset_secret": {
+                    "type": "boolean"
+                },
+                "totp_secret": {
+                    "type": "string"
+                },
                 "username": {
                     "description": "Primary key",
                     "type": "string"
@@ -865,6 +924,9 @@ const docTemplate = `{
                             "$ref": "#/definitions/models.Role"
                         }
                     ]
+                },
+                "totp_enabled": {
+                    "type": "boolean"
                 },
                 "username": {
                     "description": "Primary key",

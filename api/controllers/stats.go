@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/r4ulcl/api_template/api/middlewares"
@@ -92,6 +93,9 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 	for _, res := range perms.GetOwn {
 		if modelPtr, exists := models.ModelMap[res]; exists {
 			if tbl, err := getTableName(c.BC.DB, modelPtr); err == nil {
+				if strings.EqualFold(tbl, "api_key") {
+					continue
+				}
 				if accessByTable[tbl] == "" {
 					accessByTable[tbl] = "own"
 				}
@@ -101,6 +105,9 @@ func (c *Controller) GetDBStats(w http.ResponseWriter, r *http.Request) {
 	for _, res := range perms.Get {
 		if modelPtr, exists := models.ModelMap[res]; exists {
 			if tbl, err := getTableName(c.BC.DB, modelPtr); err == nil {
+				if strings.EqualFold(tbl, "api_key") {
+					continue
+				}
 				accessByTable[tbl] = "full"
 			}
 		}

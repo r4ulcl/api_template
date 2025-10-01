@@ -32,6 +32,32 @@ definitions:
       total_pages:
         type: integer
     type: object
+  models.APIKeyResponse:
+    properties:
+      api_key:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      enabled:
+        type: boolean
+      expiracy:
+        type: string
+      last_used:
+        type: string
+    type: object
+  models.CreateAPIKeyRequest:
+    properties:
+      description:
+        description: Description is a human readable label to identify the key's intent.
+        type: string
+      expiracy:
+        description: Expiracy is an optional UTC timestamp when the key becomes invalid.
+        type: string
+    required:
+    - description
+    type: object
   models.ErrorResponse:
     properties:
       error:
@@ -49,6 +75,9 @@ definitions:
       password:
         description: Password is the user's password used for authentication.
         type: string
+      totp_code:
+        description: TotpCode is required when Time-based OTP is enabled for the account.
+        type: string
       username:
         description: Username is the unique identifier for the user attempting to
           log in.
@@ -59,18 +88,16 @@ definitions:
     type: object
   models.Role:
     enum:
-    - admin
     - user
+    - reviewer
+    - admin
+    - '*'
     type: string
-    x-enum-comments:
-      AdminRole: '@Enum admin'
-      UserRole: '@Enum user'
-    x-enum-descriptions:
-    - '@Enum admin'
-    - '@Enum user'
     x-enum-varnames:
-    - AdminRole
     - UserRole
+    - ReviewerRole
+    - AdminRole
+    - DefaultRoleWhitelist
   models.UpdateUser:
     properties:
       created_at:
@@ -97,6 +124,14 @@ definitions:
         allOf:
         - $ref: '#/definitions/models.Role'
         description: Authorization
+      totp_code:
+        type: string
+      totp_enabled:
+        type: boolean
+      totp_reset_secret:
+        type: boolean
+      totp_secret:
+        type: string
       username:
         description: Primary key
         type: string
@@ -124,6 +159,8 @@ definitions:
         allOf:
         - $ref: '#/definitions/models.Role'
         description: Authorization
+      totp_enabled:
+        type: boolean
       username:
         description: Primary key
         type: string
@@ -238,7 +275,7 @@ paths:
       consumes:
       - application/json
       description: Deletes a resource identified by its primary key. Supports composite
-        keys via hyphen-separated format.
+        keys via hyphen-separated composite format.
       parameters:
       - description: Resource name (e.g., users, items)
         in: path
@@ -437,11 +474,13 @@ paths:
       summary: Authenticate user via query params (GET)
       tags:
       - user
-    post:
+    patch:
       consumes:
       - application/json
       description: Allows the authenticated user to change email and/or password.
-        To change password, both current and new passwords are required.
+        To change password, both current and new passwords are required. Mint a TOTP
+        secret with `totp_reset_secret` and include `totp_code` when enabling or disabling
+        MFA.
       parameters:
       - description: Fields to update
         in: body
@@ -479,17 +518,22 @@ paths:
     post:
       consumes:
       - application/json
-      description: Allows the authenticated user to generate a new API key without
-        expiration for use in scripts or integrations.
+      description: Allows the authenticated user to mint a new API key after providing
+        a description and optional expiration timestamp.
+      parameters:
+      - description: API key details
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/models.CreateAPIKeyRequest'
       produces:
       - application/json
       responses:
-        "200":
-          description: API key successfully created
+        "201":
+          description: API key metadata (token omitted)
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/models.APIKeyResponse'
         "400":
           description: Bad request (invalid input)
           schema:

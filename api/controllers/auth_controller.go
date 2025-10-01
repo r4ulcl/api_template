@@ -175,10 +175,7 @@ func (ac *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 // @Failure     500          {object}  models.ErrorResponse  "Internal server error"
 // @Router      /login [post]
 func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
+	var input models.LoginRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -188,6 +185,8 @@ func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	input.Username = strings.TrimSpace(input.Username)
+	input.Password = strings.TrimSpace(input.Password)
+	input.TotpCode = strings.TrimSpace(input.TotpCode)
 	if input.Username == "" || input.Password == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Username and password cannot be empty"})
@@ -204,6 +203,10 @@ func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
 		logAudit(&Controller{BC: ac.BC}, r, input.Username, "login", "auth", input.Username, http.StatusUnauthorized, nil)
 		return
 	}
+	user.TotpSecret = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(user.TotpSecret), " ", ""))
+	if user.TotpSecret == "" {
+		user.TotpEnabled = false
+	}
 
 	// Check password
 	if err := utils.CheckPassword(user.Password, input.Password); err != nil {
@@ -211,6 +214,21 @@ func (ac *AuthController) handleLogin(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid username or password"})
 		logAudit(&Controller{BC: ac.BC}, r, input.Username, "login", "auth", input.Username, http.StatusUnauthorized, nil)
 		return
+	}
+
+	if user.TotpEnabled && strings.TrimSpace(user.TotpSecret) != "" {
+		if input.TotpCode == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "TOTP code required"})
+			logAudit(&Controller{BC: ac.BC}, r, input.Username, "login_totp_missing", "auth", input.Username, http.StatusBadRequest, nil)
+			return
+		}
+		if !utils.ValidateTOTP(user.TotpSecret, input.TotpCode) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "Invalid username, password, or TOTP"})
+			logAudit(&Controller{BC: ac.BC}, r, input.Username, "login_totp_invalid", "auth", input.Username, http.StatusUnauthorized, nil)
+			return
+		}
 	}
 
 	// Generate JWT token

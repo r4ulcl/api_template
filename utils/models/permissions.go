@@ -69,15 +69,15 @@ var (
 	  },
 	  "user": {
 	    "get": ["example2"],
-	    "getOwn": ["example1", "exampleRelational", "auditLog"],
+	    "getOwn": ["example1", "exampleRelational", "auditLog", "apiKey"],
 	    "post": ["example2"],
-	    "postOwn": ["example1", "exampleRelational"],
+	    "postOwn": ["example1", "exampleRelational", "apiKey"],
 	    "put": [],
 	    "putOwn": ["example1", "example2", "exampleRelational"],
 	    "patch": [],
 	    "patchOwn": ["example1", "example2", "exampleRelational"],
 	    "delete": [],
-	    "deleteOwn": ["example1", "example2", "exampleRelational"]
+	    "deleteOwn": ["example1", "example2", "exampleRelational", "apiKey"]
 	  },
 	  "reviewer": {
 	    "get": ["example1", "example2", "exampleRelational"],
@@ -92,15 +92,15 @@ var (
 	    "deleteOwn": []
 	  },
 	  "admin": {
-	    "get": ["auditLog", "user", "example1", "example2", "exampleRelational"],
+	    "get": ["auditLog", "user", "example1", "example2", "exampleRelational", "apiKey"],
 	    "getOwn": [],
-	    "post": ["user", "example1", "example2", "exampleRelational"],
+	    "post": ["user", "example1", "example2", "exampleRelational", "apiKey"],
 	    "postOwn": [],
 	    "put": ["user", "example1", "example2", "exampleRelational"],
 	    "putOwn": [],
 	    "patch": ["user", "example1", "example2", "exampleRelational"],
 	    "patchOwn": [],
-	    "delete": ["user", "example1", "example2", "exampleRelational"],
+	    "delete": ["user", "example1", "example2", "exampleRelational", "apiKey"],
 	    "deleteOwn": []
 	  }
 	}`)

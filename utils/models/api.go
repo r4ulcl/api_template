@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 // LoginRequest represents the request payload for user authentication.
 //
 // It contains the username and password fields, both of which are required.
@@ -9,6 +11,9 @@ type LoginRequest struct {
 
 	// Password is the user's password used for authentication.
 	Password string `binding:"required" json:"password"`
+
+	// TotpCode is required when Time-based OTP is enabled for the account.
+	TotpCode string `json:"totp_code,omitempty"`
 }
 
 // JWTResponse represents the response containing a JWT token.
@@ -47,4 +52,22 @@ type DefaultRequest struct {
 type ErrorResponse struct {
 	// Error contains a descriptive error message.
 	Error string `json:"error"`
+}
+
+// CreateAPIKeyRequest represents the payload required to create a new API key.
+type CreateAPIKeyRequest struct {
+	// Description is a human readable label to identify the key's intent.
+	Description string `json:"description" binding:"required"`
+	// Expiracy is an optional UTC timestamp when the key becomes invalid.
+	Expiracy *time.Time `json:"expiracy,omitempty"`
+}
+
+// APIKeyResponse exposes non-sensitive fields associated with an API key.
+type APIKeyResponse struct {
+	APIKey      string     `json:"api_key,omitempty"`
+	Description string     `json:"description"`
+	Expiracy    *time.Time `json:"expiracy,omitempty"`
+	Enabled     bool       `json:"enabled"`
+	CreatedAt   time.Time  `json:"created_at"`
+	LastUsed    *time.Time `json:"last_used,omitempty"`
 }

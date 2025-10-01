@@ -221,7 +221,7 @@ func SetupRouter(
 	).Methods(http.MethodDelete)
 
 	authSub.Handle(
-		"/me/api-key/{apiKey}",
+		"/me/api-key",
 		middlewares.OwnScopeMiddleware(nil, allAuthRoles)(http.HandlerFunc(authController.GenerateAPIKey)),
 	).Methods(http.MethodPost)
 

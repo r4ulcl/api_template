@@ -1,7 +1,15 @@
 package utils
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha1"
+	"crypto/subtle"
+	"encoding/base32"
+	"encoding/binary"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -107,4 +115,73 @@ func GenerateJWTNoExpiry(claims map[string]interface{}, secret string) (string, 
 
 	token.Claims = c
 	return token.SignedString([]byte(secret))
+}
+
+// GenerateTOTPSecret returns a randomly generated Base32-encoded string suitable for
+// provisioning a TOTP authenticator. We use 160 bits of entropy (20 bytes) to align with
+// RFC 4226 recommendations and strip padding for broader authenticator compatibility.
+func GenerateTOTPSecret() (string, error) {
+	const secretBytes = 20
+	buf := make([]byte, secretBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	secret := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf)
+	return strings.ToUpper(secret), nil
+}
+
+// ValidateTOTP validates a 6-digit Time-based One-Time Password against a shared secret.
+// The secret must be a base32 encoded string. A +/-1 time-step window is permitted
+// to account for minor clock skew between client and server.
+func ValidateTOTP(secret, code string) bool {
+	secret = strings.TrimSpace(secret)
+	code = strings.TrimSpace(code)
+	if secret == "" || code == "" {
+		return false
+	}
+
+	key, err := decodeBase32(secret)
+	if err != nil {
+		return false
+	}
+
+	now := time.Now().UTC().Unix() / 30
+	for _, offset := range []int64{0, -1, 1} {
+		value := generateTOTP(key, now+offset)
+		if subtle.ConstantTimeCompare([]byte(code), []byte(value)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeBase32(secret string) ([]byte, error) {
+	normalized := strings.ToUpper(strings.ReplaceAll(secret, " ", ""))
+	// Try no padding first, then fallback to standard encoding with padding.
+	decoder := base32.StdEncoding.WithPadding(base32.NoPadding)
+	key, err := decoder.DecodeString(normalized)
+	if err == nil {
+		return key, nil
+	}
+	return base32.StdEncoding.DecodeString(normalized)
+}
+
+func generateTOTP(key []byte, counter int64) string {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], uint64(counter))
+
+	h := hmac.New(sha1.New, key)
+	_, _ = h.Write(buf[:])
+	sum := h.Sum(nil)
+	if len(sum) < 20 {
+		return ""
+	}
+	offset := sum[len(sum)-1] & 0x0F
+	binCode := (int(sum[offset])&0x7f)<<24 |
+		(int(sum[offset+1])&0xff)<<16 |
+		(int(sum[offset+2])&0xff)<<8 |
+		(int(sum[offset+3]) & 0xff)
+
+	otp := binCode % 1000000
+	return fmt.Sprintf("%06d", otp)
 }

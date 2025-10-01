@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gorilla/mux"
 	"github.com/r4ulcl/api_template/api/middlewares"
@@ -18,24 +20,11 @@ import (
 // helper to mask sensitive user fields for audit logs
 func sanitizeUserForAudit(u models.User) models.User {
 	u.Password = ""
+	u.TotpSecret = ""
 	// API keys are not embedded in User, so nothing else to redact here
 	return u
 }
 
-// Me handles GET /me and PATCH /me
-// @Summary     Get or update current user's profile
-// @Description GET returns the authenticated user's info; POST updates fields like email or password.
-// @Tags        user, auth
-// @Accept      json
-// @Produce     json
-// @Success     200   {object} models.User             "User info returned or updated"
-// @Failure     400   {object} models.ErrorResponse    "Invalid input JSON"
-// @Failure     401   {object} models.ErrorResponse    "Unauthorized: missing or invalid token"
-// @Failure     404   {object} models.ErrorResponse    "User not found"
-// @Failure     500   {object} models.ErrorResponse    "Internal server error"
-// @Router      /me [get]
-// @Router      /me [PATCH]
-// @Router      /me/api-key [post]
 func (ac *AuthController) Me(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method {
@@ -49,9 +38,9 @@ func (ac *AuthController) Me(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleUpdateUserInfo processes PATH /me: update own info (e.g. password, email, etc.)
+// handleUpdateUserInfo processes PATCH /me: update own info (e.g. password, email, etc.)
 // @Summary     Update current user's profile
-// @Description Allows the authenticated user to change email and/or password. To change password, both current and new passwords are required.
+// @Description Allows the authenticated user to change email and/or password. To change password, both current and new passwords are required. Mint a TOTP secret with `totp_reset_secret` and include `totp_code` when enabling or disabling MFA.
 // @Tags        user
 // @Accept      json
 // @Produce     json
@@ -61,8 +50,8 @@ func (ac *AuthController) Me(w http.ResponseWriter, r *http.Request) {
 // @Failure     401    {object} models.ErrorResponse    "Unauthorized (invalid current password or token)"
 // @Failure     404    {object} models.ErrorResponse    "User not found"
 // @Failure     500    {object} models.ErrorResponse    "Internal server error"
-// @Router      /me [PATH]
-// handleUpdateUserInfo processes PATH /me: update own info (e.g. password, email, etc.)
+// @Router      /me [PATCH]
+// handleUpdateUserInfo processes PATCH /me: update own info (e.g. password, email, etc.)
 func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Request) {
 	// 1) Auth context
 	uidVal := r.Context().Value(middlewares.ContextUserID)
@@ -79,11 +68,15 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 
 	// 2) Load current user's record
 	var user models.User
-	if err := ac.BC.GetRecordsByID(&user, currentUsername); err != nil {
+	if err := ac.BC.GetRecordsByIDWithSensitive(&user, currentUsername); err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "User not found"})
 		logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusNotFound, nil)
 		return
+	}
+	user.TotpSecret = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(user.TotpSecret), " ", ""))
+	if user.TotpSecret == "" {
+		user.TotpEnabled = false
 	}
 	before := sanitizeUserForAudit(user)
 
@@ -217,6 +210,127 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// 7a) TOTP configuration
+	secretChanged := false
+	var newTotpSecret string
+
+	sanitizeTotpCode := func(raw string) string {
+		raw = strings.TrimSpace(raw)
+		var builder strings.Builder
+		for _, r := range raw {
+			if unicode.IsDigit(r) {
+				builder.WriteRune(r)
+			}
+		}
+		return builder.String()
+	}
+
+	if _, ok := payload["totp_secret"]; ok {
+		currentSecret := user.TotpSecret
+		sanitized := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(req.TotpSecret), " ", ""))
+		if sanitized != currentSecret {
+			secretChanged = true
+		}
+		user.TotpSecret = sanitized
+		if sanitized == "" {
+			user.TotpEnabled = false
+		} else if sanitized != currentSecret {
+			user.TotpEnabled = false
+		}
+	}
+
+	resetSecret := false
+	if raw, ok := payload["totp_reset_secret"]; ok {
+		if flag, ok := raw.(bool); ok && flag {
+			resetSecret = true
+		}
+	}
+
+	if resetSecret {
+		if req.TotpEnabled != nil && !*req.TotpEnabled {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "cannot reset TOTP secret while disabling"})
+			logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
+			return
+		}
+		if user.TotpEnabled {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "disable TOTP before generating a new secret"})
+			logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
+			return
+		}
+		secret, err := utils.GenerateTOTPSecret()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "failed to generate TOTP secret"})
+			logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusInternalServerError, &auditChange{Before: before})
+			return
+		}
+		user.TotpSecret = secret
+		user.TotpEnabled = false
+		secretChanged = true
+		newTotpSecret = secret
+	}
+
+	if _, ok := payload["totp_enabled"]; ok {
+		if req.TotpEnabled == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "totp_enabled requires a boolean value"})
+			logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
+			return
+		}
+		if *req.TotpEnabled {
+			if strings.TrimSpace(user.TotpSecret) == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "generate a TOTP secret before enabling"})
+				logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
+				return
+			}
+			code := sanitizeTotpCode(req.TotpCode)
+			if code == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "totp_code required when enabling"})
+				logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
+				return
+			}
+			if !utils.ValidateTOTP(user.TotpSecret, code) {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "invalid TOTP code"})
+				logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
+				return
+			}
+			user.TotpEnabled = true
+		} else {
+			if strings.TrimSpace(user.TotpSecret) == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "TOTP is not currently configured"})
+				logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
+				return
+			}
+			code := sanitizeTotpCode(req.TotpCode)
+			if code == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "totp_code required when disabling"})
+				logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
+				return
+			}
+			if !utils.ValidateTOTP(user.TotpSecret, code) {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "invalid TOTP code"})
+				logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
+				return
+			}
+			user.TotpEnabled = false
+		}
+	}
+
+	if user.TotpEnabled && strings.TrimSpace(user.TotpSecret) == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "TOTP secret must be set before enabling"})
+		logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusBadRequest, &auditChange{Before: before})
+		return
+	}
+
 	// 8) Persist with UPDATE
 	user.Username = currentUsername
 	user.EditedBy = currentUsername
@@ -225,6 +339,13 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 	updates := map[string]interface{}{
 		"edited_by":   user.EditedBy,
 		"last_update": user.LastUpdate,
+	}
+
+	if secretChanged {
+		updates["totp_secret"] = user.TotpSecret
+		updates["totp_enabled"] = user.TotpEnabled
+	} else if _, ok := payload["totp_enabled"]; ok {
+		updates["totp_enabled"] = user.TotpEnabled
 	}
 
 	if currentRole == models.AdminRole {
@@ -252,7 +373,17 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 		// nothing changed beyond audit fields
 		w.WriteHeader(http.StatusOK)
 		user.Password = ""
-		_ = json.NewEncoder(w).Encode(user)
+		user.TotpSecret = ""
+		resp := struct {
+			models.User
+			NewTotpSecret string `json:"new_totp_secret,omitempty"`
+		}{
+			User: user,
+		}
+		if newTotpSecret != "" {
+			resp.NewTotpSecret = newTotpSecret
+		}
+		_ = json.NewEncoder(w).Encode(resp)
 		logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusOK, &auditChange{
 			Before: before,
 			After:  sanitizeUserForAudit(user),
@@ -271,8 +402,18 @@ func (ac *AuthController) handleUpdateUserInfo(w http.ResponseWriter, r *http.Re
 
 	// return sanitized
 	user.Password = ""
+	user.TotpSecret = ""
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(user)
+	resp := struct {
+		models.User
+		NewTotpSecret string `json:"new_totp_secret,omitempty"`
+	}{
+		User: user,
+	}
+	if newTotpSecret != "" {
+		resp.NewTotpSecret = newTotpSecret
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 	logAudit(&Controller{BC: ac.BC}, r, currentUsername, "me_update", "users", currentUsername, http.StatusOK, &auditChange{
 		Before: before,
 		After:  sanitizeUserForAudit(user),
@@ -317,13 +458,14 @@ func (ac *AuthController) handleGetUserInfo(w http.ResponseWriter, r *http.Reque
 	logAudit(&Controller{BC: ac.BC}, r, username, "read", "users", username, http.StatusOK, nil)
 }
 
-// handleGenerateAPIKey processes POST /me/api-key: generate a new permanent API key
+// handleGenerateAPIKey processes POST /me/api-key: generate a new API key.
 // @Summary     Generate API key
-// @Description Allows the authenticated user to generate a new API key without expiration for use in scripts or integrations.
+// @Description Allows the authenticated user to mint a new API key after providing a description and optional expiration timestamp.
 // @Tags        user, auth
 // @Accept      json
 // @Produce     json
-// @Success     200    {object} map[string]string       "API key successfully created"
+// @Param       payload body     models.CreateAPIKeyRequest true "API key details"
+// @Success     201    {object} models.APIKeyResponse     "API key metadata (token omitted)"
 // @Failure     400    {object} models.ErrorResponse    "Bad request (invalid input)"
 // @Failure     401    {object} models.ErrorResponse    "Unauthorized (invalid or missing token)"
 // @Failure     404    {object} models.ErrorResponse    "User not found"
@@ -349,6 +491,52 @@ func (ac *AuthController) GenerateAPIKey(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	const maxBody = 1 << 20 // 1 MiB
+	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	defer func() { _ = r.Body.Close() }()
+
+	var payload models.CreateAPIKeyRequest
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&payload); err != nil {
+		if errors.Is(err, io.EOF) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "request body is required"})
+			logAudit(&Controller{BC: ac.BC}, r, username, "create_api_key", "api_keys", "", http.StatusBadRequest, nil)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "invalid JSON payload"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "create_api_key", "api_keys", "", http.StatusBadRequest, nil)
+		return
+	}
+
+	if err := decoder.Decode(new(struct{})); err != io.EOF {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "unexpected data after JSON payload"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "create_api_key", "api_keys", "", http.StatusBadRequest, nil)
+		return
+	}
+
+	description := strings.TrimSpace(payload.Description)
+	if description == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "description is required"})
+		logAudit(&Controller{BC: ac.BC}, r, username, "create_api_key", "api_keys", "", http.StatusBadRequest, nil)
+		return
+	}
+
+	var expiracy *time.Time
+	if payload.Expiracy != nil {
+		exp := payload.Expiracy.UTC()
+		if exp.Before(time.Now().UTC()) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(models.ErrorResponse{Error: "expiracy must be in the future"})
+			logAudit(&Controller{BC: ac.BC}, r, username, "create_api_key", "api_keys", "", http.StatusBadRequest, nil)
+			return
+		}
+		expiracy = &exp
+	}
+
 	token, err := utils.GenerateJWTNoExpiry(map[string]interface{}{
 		"username": username,
 		"role":     role,
@@ -360,11 +548,13 @@ func (ac *AuthController) GenerateAPIKey(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	err = ac.createAPIKey(username, token)
+	apiKey, err := ac.createAPIKey(username, token, description, expiracy)
 	switch {
 	case err == nil:
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]string{"api_key": token})
+		resp := sanitizeAPIKeyForResponse(apiKey)
+		resp.APIKey = token
+		_ = json.NewEncoder(w).Encode(resp)
 		// only store masked token in audit logs
 		masked := ""
 		if len(token) > 12 {
@@ -387,19 +577,27 @@ func (ac *AuthController) GenerateAPIKey(w http.ResponseWriter, r *http.Request)
 }
 
 // createAPIKey inserts a new API key for a given user.
-func (ac *AuthController) createAPIKey(username, token string) error {
+func (ac *AuthController) createAPIKey(username, token, description string, expiracy *time.Time) (*models.APIKey, error) {
 	// Ensure user exists
 	var user models.User
 	if err := ac.BC.DB.First(&user, "username = ?", username).Error; err != nil {
-		return err
+		return nil, err
 	}
 
 	apiKey := models.APIKey{
-		Token:    token,
-		Username: username,
-		Enabled:  true,
+		Token:       token,
+		Description: description,
+		Expiracy:    expiracy,
+		Username:    username,
+		Enabled:     true,
+		CreatedBy:   username,
+		EditedBy:    username,
 	}
-	return ac.BC.DB.Create(&apiKey).Error
+	if err := ac.BC.DB.Create(&apiKey).Error; err != nil {
+		return nil, err
+	}
+	apiKey.Token = ""
+	return &apiKey, nil
 }
 
 // handleDeleteAPIKey processes DELETE /me/api-key/{apiKey}
@@ -468,4 +666,17 @@ func (ac *AuthController) disableAPIKey(username, token string) error {
 		return err
 	}
 	return ac.BC.DB.Model(&rec).Update("enabled", false).Error
+}
+
+func sanitizeAPIKeyForResponse(key *models.APIKey) models.APIKeyResponse {
+	if key == nil {
+		return models.APIKeyResponse{}
+	}
+	return models.APIKeyResponse{
+		Description: key.Description,
+		Expiracy:    key.Expiracy,
+		Enabled:     key.Enabled,
+		CreatedAt:   key.CreatedAt,
+		LastUsed:    key.LastUsed,
+	}
 }

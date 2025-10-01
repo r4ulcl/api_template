@@ -20,7 +20,8 @@ A **Go REST API** with MySQL database support, featuring **dynamic API endpoints
 * **Service actions** with role/username gates (no CRUD payloads required)
 * **GUI-ready API responses** filtered by user access level
 * **Automatic CreatedAt, EditedAt, UpdatedBy, CreatedBy** fields on all objects (not editable)
-* **User API key generation** (no expiration, validated on server)
+* **User API key generation** with required descriptions and optional expiration, validated on server
+* **Optional per-user TOTP** (Time-based One-Time Password) for stronger login security
 
 ---
 
@@ -263,9 +264,47 @@ Service actions let you expose ad-hoc endpoints (restart a workflow, fetch a sta
      http://localhost:8080/services/reminders/send
    ```
 
-   Service routes are mounted under the authenticated router, so they require JWT/API-key authentication just like other protected endpoints. Run `gofmt` after editing Go files to keep formatting tidy.
+Service routes are mounted under the authenticated router, so they require JWT/API-key authentication just like other protected endpoints. Run `gofmt` after editing Go files to keep formatting tidy.
 
 > Tip: if you need audit logging or side effects, the service handlers have full access to `c.BC.DB` via the controller.
+
+---
+
+## Two-Factor Authentication (TOTP)
+
+Every user can opt in to Time-based One-Time Password protection. When enabled, `POST /login` requires the additional `totp_code` field together with username and password.
+
+1. **Generate a secret** using your preferred authenticator app (typical base32 string) or request one from the API with `"totp_reset_secret": true` while TOTP is disabled.
+2. **Enable TOTP** by calling the self-service endpoint and proving ownership with a current code:
+
+   ```bash
+   curl -X PATCH http://localhost:8080/me \
+     -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "totp_secret": "JBSWY3DPEHPK3PXP",
+       "totp_enabled": true,
+       "totp_code": "123456"
+     }'
+   ```
+
+   - Secrets are stored normalized (uppercase, without spaces) and never returned in API responses.
+   - The API keeps `totp_enabled` false until a valid `totp_code` is supplied.
+3. **Authenticate** with the generated 6-digit code:
+
+   ```bash
+   curl -X POST http://localhost:8080/login \
+     -H "Content-Type: application/json" \
+     -d '{
+       "username": "alice",
+       "password": "passw0rd",
+       "totp_code": "123456"
+     }'
+   ```
+
+4. **Disable** by PATCHing `/me` with `"totp_enabled": false` and a current 6-digit `totp_code`. Generate a new secret only after disabling.
+
+Administrators can manage TOTP settings for other users through the same endpoint when allowed by permissions.
 
 ---
 
@@ -283,12 +322,12 @@ Service actions let you expose ad-hoc endpoints (restart a workflow, fetch a sta
 * [x] Own permission on each type
 * [x] Default info for GUI send only info with read access for that user
 * [x] CreatedAt, EditedAt, UpdatedBy, CreateBy in all objects, not editable in API
-* [ ] Add user groups with shared permissions and visibility scopes
-* [ ] Implement email verification on registration and password reset
-* [x] Option user to generate API key no expiracy but validated in server
-* [ ] Security check everything
+* [x] Option user to generate API key with optional expiracy and server-side validation
 * [x] Integrate audit logging for all CRUD operations
+* [ ] Implement email verification on registration and password reset
+* [x] Add TOTP
 * [ ] Add rate limiting and IP allowlist / denylist
+* [ ] Security check everything
 
 ---
 
