@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/r4ulcl/api_template/database"
 	"github.com/r4ulcl/api_template/utils/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Controller provides methods for handling CRUD operations.
@@ -514,6 +516,19 @@ func applyQueryFilters(db *gorm.DB, query url.Values) *gorm.DB {
 	return db
 }
 
+var sortFieldPattern = regexp.MustCompile(`^[a-zA-Z0-9_.]+$`)
+
+func sanitizeOrderField(field string) (string, bool) {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return "", false
+	}
+	if !sortFieldPattern.MatchString(field) {
+		return "", false
+	}
+	return field, true
+}
+
 func applySortParam(db *gorm.DB, sortParam string) *gorm.DB {
 	sortParam = strings.TrimSpace(sortParam)
 	if sortParam == "" {
@@ -526,11 +541,22 @@ func applySortParam(db *gorm.DB, sortParam string) *gorm.DB {
 		if field == "" {
 			continue
 		}
+
+		desc := false
 		if strings.HasPrefix(field, "-") {
-			db = db.Order(fmt.Sprintf("%s DESC", strings.TrimPrefix(field, "-")))
-		} else {
-			db = db.Order(fmt.Sprintf("%s ASC", field))
+			desc = true
+			field = strings.TrimPrefix(field, "-")
 		}
+
+		safeField, ok := sanitizeOrderField(field)
+		if !ok {
+			continue
+		}
+
+		db = db.Order(clause.OrderByColumn{
+			Column: clause.Column{Name: safeField},
+			Desc:   desc,
+		})
 	}
 
 	return db
